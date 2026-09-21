@@ -3,6 +3,20 @@
 # stack; xinru/scraw only needs this crawler). Sourced from the chart's
 # wenshu-crawl-cronjob.yaml template with concrete values.
 #
+# ⚠ DO NOT ENABLE THIS WITH THE ACCOUNT ATTACHED. This manifest is kept for the
+# sticky-egress future (design.md D6), and it is the one shape wenshu punishes:
+# a cold start from the cluster's datacenter IP logs the same account in from an
+# IP that never matched the session's origin. The supported shape today is the
+# standing warm browser on the operator Mac (home/office IP) driven by the local
+# nightly — that is where a session can live.
+#
+# Live evidence (2026-09-21): this CronJob had been firing daily at 17:00 with
+# WENSHU_ACCOUNT_USER/PASSWORD from the Secret, from the cluster, while the
+# account was already banned; every run failed and the account stayed banned.
+# The CronJob and its failed Jobs were deleted on 2026-09-21. Re-applying this
+# file re-arms that behaviour — leave `suspend: true` unless sticky egress is
+# in place AND the account owner has cleared the resume.
+#
 # Prereqs (applied separately):
 #   kubectl -n scraw create secret docker-registry harbor-lawcraw-pull \
 #     --docker-server=100.64.0.8:30880 \
@@ -21,7 +35,7 @@ metadata:
     app.kubernetes.io/part-of: finddata
 spec:
   schedule: "0 17 * * *"        # 01:00 Asia/Shanghai (nodes run UTC)
-  suspend: false
+  suspend: true
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

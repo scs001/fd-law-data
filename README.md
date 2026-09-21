@@ -11,7 +11,7 @@ runtime dependencies: `pg` (flk loader) and `playwright` (wenshu browser side).
 | `bin/guide-cases-load.mjs` | `laws` bucket `guide-cases/` | `law_db.guide_cases` rows + curated 不再参照 status | **data machine** |
 | `scripts/verify-publish-format.mjs` | `law_db` | publish-format report + recommended first `--since` | data machine |
 | `bin/wenshu-login.mjs` | wenshu session bootstrap (local, headed; human solves the slider) | `wenshu` bucket `sessions/` session jar | local (operator machine) |
-| `bin/wenshu-crawl.mjs` | wenshu.court.gov.cn daily incremental (login-gated) | `wenshu` bucket `raw/{y}/{m}/` JSONL + manifest + seen-set | cluster CronJob (helm-law-scraw `wenshuCrawl`) |
+| `bin/wenshu-crawl.mjs` | wenshu.court.gov.cn daily incremental (login-gated) | `wenshu` bucket `raw/{y}/{m}/` JSONL + manifest + seen-set | **operator Mac only** (home IP + warm browser; the cluster CronJob is not a supported shape — see below) |
 | `bin/wenshu-load.mjs` | `wenshu` bucket `raw/` | `wenshu_db` src_files/dict_texts/judgments + month `blocks/` rebuild | **data machine** (wherever `wenshu_db` is reachable) |
 | `bin/wenshu-probe.mjs` | wenshu spike/diagnostics (local) | JSON probe report | local (needs valid session) |
 
@@ -239,17 +239,29 @@ node scripts/wenshu-jar-refresh.mjs       # extract a jar from the operator's ow
 The account comes from `.env` (`WENSHU_ACCOUNT_USER` /
 `WENSHU_ACCOUNT_PASSWORD`) — values are NEVER committed. The crawler
 fail-louds (exit 42) whenever the session is invalid; it never crawls
-logged-out. NOTE for the cluster CronJob: a jar-based cold start works only
-when the jar is fresh AND egress IP matches where the login happened —
-until a sticky egress (design.md D6) is configured, the supported shape is
-the warm browser on the operator Mac (the CronJob stays applied for the
-sticky-proxy future).
+logged-out.
+
+**The cluster is the wrong place to run this.** A jar-based cold start works
+only when the jar is fresh AND the egress IP matches where the login happened;
+the site bans on exactly that mismatch. Until a sticky egress (design.md D6) is
+in place, the only supported shape is the **standing warm browser on the
+operator Mac** (home/office IP) driven by the local nightly. The cluster
+CronJob and its manifest are kept for that sticky-egress future and both carry
+`suspend: true`; on 2026-09-21 the live one was deleted after it had fired
+daily from the datacenter IP with the account attached while the account was
+already banned (read the warning at the top of
+`k8s/wenshu-crawl-cronjob.yaml` before re-applying it).
 
 ### Daily operation
 
-Nightly order: wenshu-crawl (cluster CronJob, 01:00 Asia/Shanghai) →
-wenshu-load (data machine, manual or cron — wherever `wenshu_db` is
-reachable; tailnet PG per `.env`).
+Nightly order, on the operator Mac (home IP, warm browser on CDP 9223):
+`wenshu-nightly.mjs` crawl → `bin/wenshu-load.mjs` (data machine, manual or
+cron — wherever `wenshu_db` is reachable; tailnet PG per `.env`).
+
+Meta-only runs (`--meta-only`) capture the full metadata row — 案号 / 标题 /
+判决时间 / 法院 — without touching a single detail page, and land as
+`crawl-{date}-meta{N}.jsonl`. They have **no 发布时间** (that field only exists
+on the detail page), so filter these rows by 判决时间, not 发布时间.
 
 Each crawl writes `raw/{y}/{m}/crawl-{date}.jsonl` plus
 `crawl-{date}.manifest.json`, and updates the per-month seen-set
