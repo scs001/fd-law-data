@@ -198,6 +198,27 @@ test("LocalS3: prefix filtering, maxKeys paging, bucket isolation; listCrawlFile
   assert.equal(monthOfKey("raw/2025/09/crawl-2025-09-10.jsonl"), "2025-09");
 });
 
+test("listCrawlFiles picks up metadata-only parts (crawl-DATE-metaN.jsonl)", async () => {
+  // The nightly emits meta-only parts when it fills gaps under a tight request
+  // budget; they carry a full metadata row but no 正文. Ignoring them left
+  // already-captured rows stranded in the bucket (hit live 2026-09-21).
+  const s3 = new LocalS3();
+  const keys = [
+    "raw/2026/09/crawl-2026-09-17-meta2.jsonl",
+    "raw/2026/09/crawl-2026-09-17-meta4.jsonl",
+    "raw/2026/09/crawl-2026-09-16-w2.jsonl",
+    "raw/2026/09/crawl-2026-09-20.jsonl",
+    "raw/2026/09/crawl-2026-09-17-meta4.manifest.json",
+  ];
+  for (const k of keys) await s3.putObject(BUCKET, k, "x");
+  assert.deepEqual(await listCrawlFiles(s3, BUCKET), [
+    "raw/2026/09/crawl-2026-09-16-w2.jsonl",
+    "raw/2026/09/crawl-2026-09-17-meta2.jsonl",
+    "raw/2026/09/crawl-2026-09-17-meta4.jsonl",
+    "raw/2026/09/crawl-2026-09-20.jsonl",
+  ]);
+});
+
 test("(a) feed-registered month skips all its crawl files entirely", async () => {
   const s3 = new LocalS3();
   await putCrawl(s3, "raw/2025/09/crawl-2025-09-10.jsonl", [crawlRow()]);
