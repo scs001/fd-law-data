@@ -1,0 +1,42 @@
+# ─── Secrets / local environment ─────────────────────────────────────
+# Credentials live in .env (RustFS keys, the wenshu account, the data
+# machine's PG password) or in the k8s Secrets that k8s/*.yaml references by
+# name. Neither belongs in the repository: the crawler reads them from the
+# environment, and .env.example documents the keys with placeholders only.
+.env
+.env.*
+!.env.example
+*creds*.txt
+.harbor-creds
+.harbor-robot-*
+kubeconfig*
+*.pem
+*.key
+
+# ─── Node ────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+.npm/
+
+# ─── Runtime state / local artifacts ─────────────────────────────────
+# A logged-in session jar, a crawl state file or a scratch output belongs to
+# the machine that produced it, not to the repository.
+*.log
+output/
+tmp/
+.cache/
+*.jar
+.crawl-state*
+
+# ─── Test tooling ────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ─── macOS / editors / local agent state ─────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+.claude/settings.local.json
+**/settings.local.json
+.opencode/
+.impeccable/

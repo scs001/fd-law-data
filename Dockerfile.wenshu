@@ -1,0 +1,28 @@
+# fd-law-data wenshu crawler image (Playwright browser automation for court
+# judgments; NO PG credentials — the wenshu loader runs on the data machine).
+# Built like fd-law-data/Dockerfile: docker buildx via cheap-1 law-builder,
+# pushed to the lawcraw_business project (100.64.0.8:30880). The wenshu
+# ACCOUNT credentials are NEVER baked into the image — they reach the cluster
+# only via the wenshu-crawl-credentials Secret.
+# Base image ships browsers preinstalled; its version MUST match the npm
+# playwright version pinned in package.json (playwright@1.63.0).
+FROM mcr.microsoft.com/playwright:v1.63.0-noble
+
+# zstd CLI: the crawl-side block fallback needs it when node:zstd is absent
+# (see lib/wenshu/blocks.js); the base image does not ship it.
+RUN apt-get update && apt-get install -y --no-install-recommends zstd \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright NODE_ENV=production
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-fund --no-audit
+
+COPY lib/ lib/
+COPY bin/ bin/
+
+RUN useradd -m crawler && chown -R crawler /app
+USER crawler
+
+CMD ["node", "bin/wenshu-crawl.mjs"]

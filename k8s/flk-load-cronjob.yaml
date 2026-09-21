@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: flk-law-load
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: flk-law-load
+    app.kubernetes.io/part-of: finddata
+spec:
+  schedule: "30 4 * * *"       # 04:30 Asia/Shanghai (nodes run Beijing time)
+  suspend: false
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 7200
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: flk-law-load
+        spec:
+          imagePullSecrets:
+            - name: harbor-lawcraw-pull
+          restartPolicy: OnFailure
+          containers:
+            - name: loader
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.1.9
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: RUSTFS_ENDPOINT
+                  value: "http://100.64.0.11:9000"
+                - name: RUSTFS_ACCESS_KEY
+                  valueFrom: {secretKeyRef: {name: flk-law-crawl-credentials, key: rustfs-access-key}}
+                - name: RUSTFS_SECRET_KEY
+                  valueFrom: {secretKeyRef: {name: flk-law-crawl-credentials, key: rustfs-secret-key}}
+                - name: PG_HOST
+                  value: "100.64.0.5"     # data-machine PG over tailnet
+                - name: PG_PORT
+                  value: "5432"
+                - name: PG_USER
+                  valueFrom: {secretKeyRef: {name: flk-law-pg-credentials, key: pg-user}}
+                - name: PG_PASSWORD
+                  valueFrom: {secretKeyRef: {name: flk-law-pg-credentials, key: pg-password}}
+                - name: PG_DATABASE
+                  value: "law_db"
+              command: ["node", "bin/flk-load.mjs"]

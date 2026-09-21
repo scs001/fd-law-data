@@ -1,0 +1,64 @@
+# flk-law-crawl CronJob — xinru cluster, scraw namespace.
+# Standalone manifest (the helm-law-scraw chart installs the full scrapyd
+# stack; xinru/scraw only needs this crawler). Sourced from the chart's
+# flk-law-crawl-cronjob.yaml template with concrete values.
+#
+# Prereqs (applied separately):
+#   kubectl -n scraw create secret docker-registry harbor-lawcraw-pull \
+#     --docker-server=100.64.0.8:30880 \
+#     --docker-username='<robot>' --docker-password='<token>'
+#   kubectl -n scraw create secret generic flk-law-crawl-credentials \
+#     --from-literal=rustfs-access-key=<key> --from-literal=rustfs-secret-key=<secret>
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: flk-law-crawl
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: flk-law-crawl
+    app.kubernetes.io/part-of: finddata
+spec:
+  schedule: "30 2 * * *"       # 02:30 Asia/Shanghai (nodes run Beijing time)
+  suspend: false
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 14400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: flk-law-crawl
+        spec:
+          imagePullSecrets:
+            - name: harbor-lawcraw-pull
+          restartPolicy: OnFailure
+          containers:
+            - name: crawler
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.1.9
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: RUSTFS_ENDPOINT
+                  value: "http://100.64.0.11:9000"   # tailnet-internal RustFS
+                - name: RUSTFS_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: flk-law-crawl-credentials
+                      key: rustfs-access-key
+                - name: RUSTFS_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: flk-law-crawl-credentials
+                      key: rustfs-secret-key
+                - name: RUSTFS_REGION
+                  value: "us-east-1"
+                - name: LAWS_BUCKET
+                  value: "laws"
+                - name: FLK_RATE_MS
+                  value: "1100"
+                - name: FLK_PAGE_SIZE
+                  value: "100"
+                - name: FLK_LOOKBACK_DAYS
+                  value: "7"
+              command: ["node", "bin/flk-crawl.mjs"]

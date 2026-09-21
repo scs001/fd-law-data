@@ -1,0 +1,24 @@
+{
+  "name": "fd-law-data",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Incremental crawlers + loaders for Chinese legal open data (flk.npc.gov.cn regulations; wenshu judgments in a later change)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "crawl:flk": "node bin/flk-crawl.mjs",
+    "load:flk": "node bin/flk-load.mjs",
+    "crawl:guide-cases": "node bin/guide-cases-crawl.mjs",
+    "load:guide-cases": "node bin/guide-cases-load.mjs",
+    "login:wenshu": "node bin/wenshu-login.mjs",
+    "crawl:wenshu": "node bin/wenshu-crawl.mjs",
+    "load:wenshu": "node bin/wenshu-load.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.12.0",
+    "playwright": "^1.63.0"
+  }
+}

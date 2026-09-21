@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: flk-law-embed
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: flk-law-embed
+    app.kubernetes.io/part-of: finddata
+spec:
+  schedule: "30 5 * * *"       # 05:30 Asia/Shanghai (nodes run Beijing time) — after the 04:30 loader
+  suspend: false
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 10800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: flk-law-embed
+        spec:
+          imagePullSecrets:
+            - name: harbor-lawcraw-pull
+          restartPolicy: OnFailure
+          containers:
+            - name: embedder
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.1.13
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: RUSTFS_ENDPOINT
+                  value: "http://100.64.0.11:9000"
+                - name: RUSTFS_ACCESS_KEY
+                  valueFrom: {secretKeyRef: {name: flk-law-crawl-credentials, key: rustfs-access-key}}
+                - name: RUSTFS_SECRET_KEY
+                  valueFrom: {secretKeyRef: {name: flk-law-crawl-credentials, key: rustfs-secret-key}}
+                - name: LAWS_EXPORT_BUCKET
+                  value: "laws-export"
+                - name: EMBED_API_KEY
+                  valueFrom: {secretKeyRef: {name: flk-embed-credentials, key: embed-api-key}}
+                - name: EMBED_MODEL
+                  value: "Qwen/Qwen3-Embedding-0.6B"
+                - name: QDRANT_URL
+                  value: "http://100.64.0.9:6333"
+                - name: QDRANT_COLLECTION
+                  value: "law_chunks_v2"
+              command: ["node", "bin/flk-embed.mjs"]
