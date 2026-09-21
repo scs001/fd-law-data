@@ -98,12 +98,25 @@ runs — NOT the migrating cheap cluster):
 kubectl -n scraw apply -f k8s/flk-crawl-cronjob.yaml   # daily 02:30 Asia/Shanghai
 ```
 
-Image: `100.64.0.8:30880/lawcraw_business/fd-law-data:v0.1.1` — build via
-cheap-1 (`docker buildx --builder law-builder`, see chart values comment).
-The `finddata/` public project is the preferred home; relocation needs
-current Harbor admin credentials (INFRA-NOTES credentials verified stale
-2026-09-18). The helm chart's `flkLawCrawl` block is the alternative full-stack
-path for when the cheap cluster returns.
+Image: **built by the Jenkins job `fd-law-data`** — gitee push (webhook token
+`fd-law-data`) → `docker build` → push to `100.64.0.8:30880/lawcraw_business/`,
+tagged with the immutable `sha-<short-hash>` of the commit it was built from
+(push a branch and read the tag off the build log, then pin it in the
+manifest). The job also builds the Playwright image via the `BUILD_WENSHU`
+parameter, off by default because the build node's disk is tight.
+
+```bash
+# trigger by hand (or just push to main — the webhook does it):
+#   https://jenkins.finddatatech.cloud/job/fd-law-data/build
+# the pipeline is the fleet's standard shape; copy from it rather than improvise
+```
+
+Historically these images were hand-built via cheap-1
+(`docker buildx --builder law-builder`): before the gitee repo and the Jenkins
+job existed there was no other channel, so `v0.1.x` tags are not reproducible
+and predate the job. New pins use `sha-<hash>` only.
+
+## Guiding cases (指导性案例)
 
 ## Guiding cases (指导性案例)
 

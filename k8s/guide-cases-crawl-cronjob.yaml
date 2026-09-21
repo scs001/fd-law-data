@@ -5,9 +5,10 @@
 # everything to lose from touching the site unattended. Enable it only after
 # a manual run has been reconciled against the bucket (design.md D9).
 #
-# Image note: the manifest pins a tag that must be built from this repo's
-# current code before the job can run — build with cheap-1 (`docker buildx
-# --builder law-builder`, see README "Deployment") and bump the tag here.
+# Image note: built by the Jenkins job `fd-law-data`
+# (gitee push -> docker build -> push to Harbor), tagged with the immutable
+# sha-<short-hash> of the commit it was built from. Bump the tag here only
+# after that build is green.
 #
 # Prereqs (applied separately, already present for flk/wenshu):
 #   kubectl -n scraw create secret docker-registry harbor-lawcraw-pull \
@@ -44,7 +45,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.1.10
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-345a50a
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
