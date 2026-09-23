@@ -77,6 +77,8 @@ spec:
                 secretKeyRef: { name: legal-identity-rmfyalk-acct001, key: crawl_proxy_url }
             - name: REQUIRE_LOGIN_PROXY
               value: "1"
+            - name: LEGAL_AUTH_DEBUG_STACK
+              value: "1"
             - name: RUSTFS_ENDPOINT
               value: "http://100.64.0.11:9000"
             - name: RUSTFS_ACCESS_KEY
