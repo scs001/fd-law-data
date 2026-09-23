@@ -117,9 +117,9 @@ test("source 401 marks identity login_required and releases with failure", async
     }),
     /HTTP 401/,
   );
-  assert.deepEqual(brokerCalls.map((c) => c[0]), ["/lease/acquire", "/failure", "/lease/release"]);
-  assert.equal(brokerCalls[1][1].status, "login_required");
-  assert.equal(brokerCalls[2][1].failure, true);
+  assert.deepEqual(brokerCalls.map((c) => c[0]), ["/lease/acquire", "/lease/release", "/failure"]);
+  assert.equal(brokerCalls[1][1].failure, true);
+  assert.equal(brokerCalls[2][1].status, "login_required");
 });
 
 test("probe failure marks identity without invoking work", async () => {
@@ -135,7 +135,7 @@ test("probe failure marks identity without invoking work", async () => {
     }),
     (err) => err.code === "SESSION_PROBE_FAILED",
   );
-  assert.deepEqual(brokerCalls.map((c) => c[0]), ["/lease/acquire", "/failure", "/lease/release"]);
+  assert.deepEqual(brokerCalls.map((c) => c[0]), ["/lease/acquire", "/lease/release", "/failure"]);
 });
 
 test("cross-proxy identity probes both proxies before allowing work", async () => {

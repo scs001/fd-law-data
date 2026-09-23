@@ -7,6 +7,7 @@ import { createS3 } from "../lib/s3.js";
 import { crawlLegalSource } from "../lib/legal-sources/runtime.js";
 import { getSourceAdapter, SOURCE_ADAPTERS } from "../lib/legal-sources/sources/index.js";
 import { withCrawlerIdentity } from "../lib/auth-broker/client.js";
+import { createProxyFetch } from "../lib/auth-broker/proxy-fetch.js";
 
 function arg(argv, name, def) {
   const i = argv.indexOf(`--${name}`);
@@ -50,6 +51,7 @@ export async function main({ source: defaultSource, argv = [] } = {}) {
   };
 
   const accountId = arg(argv, "account-id") === true ? undefined : arg(argv, "account-id");
+  const crawlProxyUrl = process.env.LEGAL_AUTH_CRAWL_PROXY_URL ?? null;
   if (!accountId) {
     const result = await crawlLegalSource(crawlOptions);
     console.log(JSON.stringify({
@@ -70,11 +72,13 @@ export async function main({ source: defaultSource, argv = [] } = {}) {
     owner: `legal-source-crawl:${process.pid}`,
     ttlMs: Number(arg(argv, "lease-ttl-ms", 30 * 60 * 1000)),
     jarKey: process.env.LEGAL_AUTH_JAR_KEY,
-    fetchImpl: globalThis.fetch,
+    crawlProxyUrl,
+    fetchImpl: createProxyFetch(crawlProxyUrl),
     work: async ({ session, identity, mode, headers, probe }) => {
       const crawl = await crawlLegalSource({
         ...crawlOptions,
         authHeaders: headers,
+        fetchImpl: createProxyFetch(crawlProxyUrl),
         auth: {
           broker: arg(argv, "auth-broker") === true
             ? process.env.LEGAL_AUTH_BROKER_URL
