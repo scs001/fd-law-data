@@ -17,7 +17,7 @@ XVFB_PID=$!
 
 wait_for_x() {
   i=0
-  while ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; do
+  while [ ! -S "/tmp/.X11-unix/X${DISPLAY#*:}" ]; do
     i=$((i + 1))
     [ "$i" -gt 100 ] && { echo "Xvfb did not become ready" >&2; exit 1; }
     sleep 0.1
