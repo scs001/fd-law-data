@@ -42,7 +42,7 @@ spec:
         fsGroup: 1001
       containers:
       - name: auth-broker
-        image: 100.64.0.8:30880/lawcraw_business/legal-auth-broker:sha-7b76f85
+        image: 100.64.0.8:30880/lawcraw_business/legal-auth-broker:sha-4795eda
         imagePullPolicy: IfNotPresent
         ports:
         - name: novnc
@@ -167,7 +167,7 @@ spec:
     spec:
       containers:
       - name: lease-api
-        image: 100.64.0.8:30880/lawcraw_business/legal-auth-broker:sha-7b76f85
+        image: 100.64.0.8:30880/lawcraw_business/legal-auth-broker:sha-4795eda
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
