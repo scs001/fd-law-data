@@ -21,7 +21,7 @@ const keyOf = (s) => JSON.stringify([s.dateStart, s.dateEnd, s.province, s.caseT
 test("planSlices: small count yields a single unsplit leaf", async () => {
   const { slices, stats } = await planSlices({ window: WIN, regions: [], caseTypes: [], countOf: async () => 50 });
   assert.deepEqual(slices, [{ dateStart: "2026-09-11", dateEnd: "2026-09-17", province: null, caseType: null }]);
-  assert.deepEqual(stats, { probed: 1, subdividedRegion: 0, subdividedCaseType: 0, subdividedDate: 0, overflowLeaves: 0 });
+  assert.deepEqual(stats, { probed: 1, subdividedRegion: 0, subdividedCaseType: 0, subdividedCourtLevel: 0, subdividedDocType: 0, subdividedReason: 0, subdividedDate: 0, overflowLeaves: 0 });
 });
 
 test("planSlices: over cap splits by region", async () => {
@@ -38,7 +38,7 @@ test("planSlices: over cap splits by region", async () => {
     assert.equal(s.dateStart, "2026-09-11");
     assert.equal(s.dateEnd, "2026-09-17");
   }
-  assert.deepEqual(stats, { probed: 3, subdividedRegion: 1, subdividedCaseType: 0, subdividedDate: 0, overflowLeaves: 0 });
+  assert.deepEqual(stats, { probed: 3, subdividedRegion: 1, subdividedCaseType: 0, subdividedCourtLevel: 0, subdividedDocType: 0, subdividedReason: 0, subdividedDate: 0, overflowLeaves: 0 });
 });
 
 test("planSlices: region still over cap splits by caseType within the region", async () => {
@@ -55,7 +55,7 @@ test("planSlices: region still over cap splits by caseType within the region", a
     ],
   );
   assert.ok(slices.every((s) => !s.overflow));
-  assert.deepEqual(stats, { probed: 7, subdividedRegion: 1, subdividedCaseType: 2, subdividedDate: 0, overflowLeaves: 0 });
+  assert.deepEqual(stats, { probed: 7, subdividedRegion: 1, subdividedCaseType: 2, subdividedCourtLevel: 0, subdividedDocType: 0, subdividedReason: 0, subdividedDate: 0, overflowLeaves: 0 });
 });
 
 test("planSlices: caseType over cap falls through to date halving down to single days", async () => {
@@ -70,7 +70,7 @@ test("planSlices: caseType over cap falls through to date halving down to single
       ["2026-09-12", "2026-09-12", "江苏省", "民事", undefined],
     ],
   );
-  assert.deepEqual(stats, { probed: 5, subdividedRegion: 1, subdividedCaseType: 1, subdividedDate: 1, overflowLeaves: 0 });
+  assert.deepEqual(stats, { probed: 5, subdividedRegion: 1, subdividedCaseType: 1, subdividedCourtLevel: 0, subdividedDocType: 0, subdividedReason: 0, subdividedDate: 1, overflowLeaves: 0 });
 });
 
 test("planSlices: date halving alone when no region/caseType axes exist", async () => {
@@ -87,15 +87,18 @@ test("planSlices: date halving alone when no region/caseType axes exist", async 
     ],
   );
   // 1 root split + 2 splits of the 2-day halves.
-  assert.deepEqual(stats, { probed: 7, subdividedRegion: 0, subdividedCaseType: 0, subdividedDate: 3, overflowLeaves: 0 });
+  assert.deepEqual(stats, { probed: 7, subdividedRegion: 0, subdividedCaseType: 0, subdividedCourtLevel: 0, subdividedDocType: 0, subdividedReason: 0, subdividedDate: 3, overflowLeaves: 0 });
 });
 
 test("planSlices: single-day region+caseType still over cap becomes an overflow leaf", async () => {
   const window = { start: "2026-09-11", end: "2026-09-11" }; // single day
   const countOf = async () => "OVERFLOW";
   const { slices, stats } = await planSlices({ window, regions: ["江苏省"], caseTypes: ["民事"], countOf, resultCap: 200 });
-  assert.deepEqual(slices, [{ dateStart: "2026-09-11", dateEnd: "2026-09-11", province: "江苏省", caseType: "民事", overflow: true }]);
-  assert.deepEqual(stats, { probed: 3, subdividedRegion: 1, subdividedCaseType: 1, subdividedDate: 0, overflowLeaves: 1 });
+  assert.deepEqual(slices, [{
+    dateStart: "2026-09-11", dateEnd: "2026-09-11", province: "江苏省", caseType: "民事",
+    courtLevel: null, docType: null, reason: null, overflow: true,
+  }]);
+  assert.deepEqual(stats, { probed: 3, subdividedRegion: 1, subdividedCaseType: 1, subdividedCourtLevel: 0, subdividedDocType: 0, subdividedReason: 0, subdividedDate: 0, overflowLeaves: 1 });
 });
 
 test("planSlices: countOf is never called twice for the same slice (cache)", async () => {

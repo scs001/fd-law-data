@@ -19,6 +19,134 @@ The crawler holds **no PG credentials**; the loader holds no crawler secrets.
 Credentials come from `.env` (see `.env.example`) or the k8s Secret
 `flk-law-crawl-credentials` (keys: `rustfs-access-key`, `rustfs-secret-key`).
 
+## Wave-1 authoritative legal sources
+
+These sources share one runtime (`lib/legal-sources/runtime.js`), one object
+layout, and one idempotent table (`law_db.legal_documents`):
+
+| Source id | Entry points | Access known on 2026-09-23 | Output |
+|---|---|---|---|
+| `rmfyalk-case-library` | `bin/rmfyalk-{crawl,load}.mjs` | search/content APIs require login (`401 未登录`); endpoints verified from the live front-end bundle | `legal-sources/rmfyalk-case-library/` |
+| `mfa-treaty-library` | `bin/mfa-treaty-{crawl,load}.mjs` | public server-rendered list/detail pages | same pattern under `legal-sources/mfa-treaty-library/` |
+| `gov-rules-library` | `bin/gov-rules-{crawl,load}.mjs` | public HTML parser; override `GOV_RULES_LIST_URL` if the MOJ/gov.cn path moves | same pattern |
+| `party-regulation-library` | `bin/party-regulation-{crawl,load}.mjs` | public 12371.cn special/category pages | same pattern |
+| `ccdi-supervisory-regulations` | `bin/ccdi-supervisory-{crawl,load}.mjs` | plain HTTP reaches a JS cookie challenge; it is recorded as structure drift, never parsed as content | same pattern |
+
+```bash
+# read-only; writes nothing
+node bin/rmfyalk-crawl.mjs --dry-run --size 1 --max-pages 1
+node bin/mfa-treaty-crawl.mjs --dry-run --max-pages 1
+
+# crawler: object storage only
+node bin/<source>-crawl.mjs --full       # first sweep
+node bin/<source>-crawl.mjs              # incremental state/hash refresh
+
+# data machine: legal_documents only; guards laws/law_chunks row counts
+node bin/<source>-load.mjs
+node bin/legal-sources-report.mjs        # cross-source coverage/gaps
+```
+
+Object layout is deliberately append-only:
+
+```text
+legal-sources/<source>/
+  structured/run-YYYY-MM-DD-partNNN.jsonl
+  manifest/run-YYYY-MM-DD-<runid>.manifest.json
+  raw/<source_id>/...                     # response/HTML snapshots
+  attachments/<source_id>/...             # PDF/docx; DB stores keys, not blobs
+  state.json                              # hashes, retry queue, watermark
+```
+
+`legal_documents` has a unique `(source, source_id)` key. Unchanged hashes are
+skipped; changed hashes update in place. The loader only writes this table and
+fails if `laws`/`law_chunks` counts move. Verify the DDL without mutating PG:
+
+```bash
+npm run verify:legal-documents-ddl     # temp schema + transactional rollback
+```
+
+### Rmfyalk session note
+
+A live dry-run on 2026-09-23 reached the API but got `{"code":"401"}`. The
+adapter raises `SessionProxyError("LOGIN_REQUIRED")` rather than recording an
+empty corpus. CronJobs therefore ship suspended until a source-scoped session
+and, if required, `RMFYALK_CASE_LIBRARY_PROXY_URL` are provisioned.
+
+### FLK historical backfill
+
+`--backfill` is a separate cursor (`incremental/backfill-state.json`) and output
+prefix (`incremental/backfill/`) so it cannot move the daily watermark. It seeds
+`known` and `src_seq` from the live incremental state, so already-crawled ids
+are not re-fetched and src_id never collides.
+
+```bash
+# one bounded window per run; safe to run repeatedly
+node bin/flk-crawl.mjs --backfill --until 2026-09-23 --batch-days 365
+
+# coverage: completed windows, local rows by category/year, optional source totals
+node scripts/flk-backfill-report.mjs
+node scripts/flk-backfill-report.mjs --live
+```
+
+The loader accepts both `incremental/...` and `incremental/backfill/...` part
+files, applies the same `(src_db, source_id)` skip, and still refuses to modify
+`law`/`lawv2` historical rows.
+
+### Auth Broker / identity pool
+
+The independent `legal-auth-broker` image owns human login, per-account browser
+profiles, proxy identity binding, encrypted session extraction and identity
+leases. Crawler images never log in and never contain account credentials.
+
+Core objects:
+
+```text
+db/002_legal_source_identity.sql      identity + lease + audit tables
+lib/auth-broker/identity.js           lease SQL / state machine
+lib/auth-broker/session-jar.js        AES-256-GCM jar + redaction
+lib/auth-broker/browser-profile.js    per-identity Chromium profile
+lib/auth-broker/logins/rmfyalk.js     captures faxin-cpws-al-token
+lib/auth-broker/proxy.js              same/cross-proxy probes and policy
+lib/auth-broker/service.js            internal lease API
+bin/legal-auth-broker.mjs             serve / login / probe
+Dockerfile.auth-broker                generic browser/login image
+k8s/legal-auth-broker.yaml            job, lease API and internal Service
+```
+
+Operational flow:
+
+```bash
+# one-time secret material (values are examples only)
+# kubectl -n scraw create secret generic legal-auth-broker \
+#   --from-literal=broker-token=<random> \
+#   --from-literal=jar-key=<32-byte-base64> \
+#   --from-literal=vnc-password=<random>
+
+# create an identity-specific Secret for proxy ids and the login proxy URL.
+
+# login job: open noVNC only through a private tunnel
+kubectl -n scraw apply -f k8s/legal-auth-broker.yaml
+kubectl -n scraw port-forward pod/<login-pod> 6080:6080
+# open http://127.0.0.1:6080/vnc.html and complete the upstream login
+
+# broker lease API is ClusterIP-only
+node bin/legal-source-crawl.mjs --source rmfyalk-case-library \
+  --account-id acct001 --dry-run
+```
+
+Default policy is `login_proxy_id == crawl_proxy_id`. A different crawl proxy
+must pass login-proxy probe, crawl-proxy probe and a small-batch run before it
+is allowed. Logs emit identity/proxy/status only; tokens, cookies, names and
+national identifiers are redacted.
+
+### Deployment debt before enabling CronJobs
+
+1. Push a Jenkins image containing this code (the manifests currently reference
+   the placeholder tag `v0.2.0-legal-sources`) and pin that immutable sha tag.
+2. Apply `k8s/legal-source-crawl-cronjobs.yaml` or the `helm-law-scraw`
+   `legalSources` block; `helm template` renders six CronJobs.
+3. Leave every new CronJob suspended until its real dry-run/load check passes.
+
 ## Daily operation
 
 ```bash

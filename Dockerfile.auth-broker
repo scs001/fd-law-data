@@ -1,0 +1,32 @@
+# Generic Auth Broker image: browser runtime + remote human-login UI + lease
+# API. It deliberately contains no accounts, passwords, cookies, proxy URLs or
+# session jars; all secret material is injected through env/Secret/PVC.
+FROM mcr.microsoft.com/playwright:v1.63.0-noble
+
+ENV NODE_ENV=production \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    LEGAL_AUTH_PROFILE_ROOT=/data/legal-auth/profiles
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      xvfb x11vnc novnc websockify xdotool procps tini \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-fund --no-audit --registry=https://registry.npmmirror.com
+
+COPY lib/ lib/
+COPY bin/ bin/
+COPY docker/auth-broker-entrypoint.sh /usr/local/bin/auth-broker-entrypoint
+COPY docker/legal-auth-noVNC-README.txt /usr/local/share/legal-auth-noVNC-README.txt
+RUN chmod +x /usr/local/bin/auth-broker-entrypoint \
+ && mkdir -p /data/legal-auth/profiles \
+ && useradd -m broker \
+ && chown -R broker:broker /app /data/legal-auth
+
+USER broker
+EXPOSE 8787 6080
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/auth-broker-entrypoint"]
+CMD ["node", "bin/legal-auth-broker.mjs", "serve", "--host", "0.0.0.0"]

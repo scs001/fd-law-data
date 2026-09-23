@@ -1,0 +1,282 @@
+# Wave-1 authoritative legal sources. All CronJobs ship suspended: first run
+# each adapter locally/dry-run, pin a Jenkins sha image, then enable one source
+# at a time. No PG credentials are mounted; loaders run on the data machine.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rmfyalk-case-crawl
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: rmfyalk-case-crawl
+    app.kubernetes.io/part-of: finddata
+spec:
+  schedule: "10 3 * * *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 21600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: rmfyalk-case-crawl
+        spec:
+          imagePullSecrets:
+            - name: harbor-lawcraw-pull
+          restartPolicy: OnFailure
+          containers:
+            - name: crawler
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.2.0-legal-sources
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: RUSTFS_ENDPOINT
+                  value: "http://100.64.0.11:9000"
+                - name: RUSTFS_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
+                - name: RUSTFS_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-secret-key }
+                - name: RUSTFS_REGION
+                  value: "us-east-1"
+                - name: LAWS_BUCKET
+                  value: "laws"
+                # Set in a source-specific Secret/local overlay once a real
+                # account/session is approved; never commit credentials here.
+                - name: RMFYALK_LIBRARY_PROXY_URL
+                  value: ""
+              command: ["node", "bin/rmfyalk-crawl.mjs", "--rate-ms", "1100"]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mfa-treaty-crawl
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: mfa-treaty-crawl
+    app.kubernetes.io/part-of: finddata
+spec:
+  schedule: "20 3 * * *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 14400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: mfa-treaty-crawl
+        spec:
+          imagePullSecrets:
+            - name: harbor-lawcraw-pull
+          restartPolicy: OnFailure
+          containers:
+            - name: crawler
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.2.0-legal-sources
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: RUSTFS_ENDPOINT
+                  value: "http://100.64.0.11:9000"
+                - name: RUSTFS_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
+                - name: RUSTFS_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-secret-key }
+                - name: RUSTFS_REGION
+                  value: "us-east-1"
+                - name: LAWS_BUCKET
+                  value: "laws"
+              command: ["node", "bin/mfa-treaty-crawl.mjs", "--rate-ms", "1100"]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gov-rules-crawl
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: gov-rules-crawl
+    app.kubernetes.io/part-of: finddata
+spec:
+  schedule: "30 3 * * *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 14400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: gov-rules-crawl
+        spec:
+          imagePullSecrets:
+            - name: harbor-lawcraw-pull
+          restartPolicy: OnFailure
+          containers:
+            - name: crawler
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.2.0-legal-sources
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: RUSTFS_ENDPOINT
+                  value: "http://100.64.0.11:9000"
+                - name: RUSTFS_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
+                - name: RUSTFS_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-secret-key }
+                - name: RUSTFS_REGION
+                  value: "us-east-1"
+                - name: LAWS_BUCKET
+                  value: "laws"
+              command: ["node", "bin/gov-rules-crawl.mjs", "--rate-ms", "1100"]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: party-regulation-crawl
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: party-regulation-crawl
+    app.kubernetes.io/part-of: finddata
+spec:
+  schedule: "40 3 * * *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 14400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: party-regulation-crawl
+        spec:
+          imagePullSecrets:
+            - name: harbor-lawcraw-pull
+          restartPolicy: OnFailure
+          containers:
+            - name: crawler
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.2.0-legal-sources
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: RUSTFS_ENDPOINT
+                  value: "http://100.64.0.11:9000"
+                - name: RUSTFS_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
+                - name: RUSTFS_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-secret-key }
+                - name: RUSTFS_REGION
+                  value: "us-east-1"
+                - name: LAWS_BUCKET
+                  value: "laws"
+              command: ["node", "bin/party-regulation-crawl.mjs", "--rate-ms", "1100"]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ccdi-supervisory-crawl
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: ccdi-supervisory-crawl
+    app.kubernetes.io/part-of: finddata
+spec:
+  schedule: "50 3 * * *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 14400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: ccdi-supervisory-crawl
+        spec:
+          imagePullSecrets:
+            - name: harbor-lawcraw-pull
+          restartPolicy: OnFailure
+          containers:
+            - name: crawler
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.2.0-legal-sources
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: RUSTFS_ENDPOINT
+                  value: "http://100.64.0.11:9000"
+                - name: RUSTFS_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
+                - name: RUSTFS_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-secret-key }
+                - name: RUSTFS_REGION
+                  value: "us-east-1"
+                - name: LAWS_BUCKET
+                  value: "laws"
+              command: ["node", "bin/ccdi-supervisory-crawl.mjs", "--rate-ms", "1100"]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: flk-law-backfill
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: flk-law-backfill
+    app.kubernetes.io/part-of: finddata
+spec:
+  # Run every 4h while the one-window-per-run historical backfill is active.
+  schedule: "0 */4 * * *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 21600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: flk-law-backfill
+        spec:
+          imagePullSecrets:
+            - name: harbor-lawcraw-pull
+          restartPolicy: OnFailure
+          containers:
+            - name: crawler
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.2.0-legal-sources
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: RUSTFS_ENDPOINT
+                  value: "http://100.64.0.11:9000"
+                - name: RUSTFS_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
+                - name: RUSTFS_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-secret-key }
+                - name: RUSTFS_REGION
+                  value: "us-east-1"
+                - name: LAWS_BUCKET
+                  value: "laws"
+                - name: FLK_PAGE_SIZE
+                  value: "100"
+                - name: FLK_RATE_MS
+                  value: "1100"
+              command:
+                - node
+                - bin/flk-crawl.mjs
+                - --backfill
+                - --until
+                - "2026-09-23"
+                - --batch-days
+                - "365"

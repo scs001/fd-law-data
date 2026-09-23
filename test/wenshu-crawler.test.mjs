@@ -93,10 +93,10 @@ const baseOpts = (s3, adapter, over = {}) => ({
   ...over,
 });
 
-test("shapeRow emits exact key order docId, id_origin, 17 dict cols, qwContent", () => {
+test("shapeRow emits exact key order docId, id_origin, 17 dict cols, qwContent, url", () => {
   const detail = makeDetail("a".repeat(32));
   const row = shapeRow(detail, () => ({ doc_id: "X", id_origin: "test" }));
-  assert.deepEqual(Object.keys(row), ["docId", "id_origin", ...DICT_COLS, "qwContent"]);
+  assert.deepEqual(Object.keys(row), ["docId", "id_origin", ...DICT_COLS, "qwContent", "url"]);
   assert.equal(row.docId, "X");
   assert.equal(row.id_origin, "test");
   assert.equal(row.qwContent, "<div>全文HTML</div>");

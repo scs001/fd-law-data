@@ -45,7 +45,7 @@ async function listAll(bucket, prefix) {
 
 async function listDailyFiles(bucket) {
   return (await listAll(bucket, "incremental/"))
-    .filter((c) => /^incremental\/\d{4}\/\d{2}\/flk-\d{4}-\d{2}-\d{2}(-part\d+)?\.jsonl$/.test(c.key))
+    .filter((c) => /^incremental\/(?:backfill\/)?\d{4}\/\d{2}\/flk-\d{4}-\d{2}-\d{2}(-part\d+)?\.jsonl$/.test(c.key))
     .map((c) => c.key)
     .sort();
 }

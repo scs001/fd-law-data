@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // flk daily crawl. Credentials via env/.env only (RustFS keys; no PG here).
+// --backfill advances one bounded historical window in backfill-state.json;
+// normal incremental runs continue to own incremental/state.json.
 import { loadConfig } from "../lib/config.js";
 import { createS3 } from "../lib/s3.js";
-import { crawl, retryPending } from "../lib/flk/crawler.js";
+import { crawl, retryPending, BACKFILL_STATE_KEY, loadBackfillState, saveBackfillState } from "../lib/flk/crawler.js";
+import { backfillPlan, backfillWindow, advanceBackfill, DEFAULT_BACKFILL_SINCE, DEFAULT_BACKFILL_BATCH_DAYS } from "../lib/flk/backfill.js";
 
 function arg(name, def) {
   const i = process.argv.indexOf(`--${name}`);
@@ -14,6 +17,7 @@ function arg(name, def) {
 const cfg = loadConfig();
 const dryRun = !!arg("dry-run");
 const retryMode = !!arg("retry-pending");
+const backfillMode = !!arg("backfill");
 const s3 = createS3(
   dryRun
     ? { endpoint: "https://dry-run.invalid", accessKey: "dry", secretKey: "run" }
@@ -23,6 +27,44 @@ const s3 = createS3(
 if (retryMode) {
   const res = await retryPending({ s3, bucket: cfg.lawsBucket, days: Number(arg("days", 14)), dryRun, rateMs: cfg.flkRateMs });
   console.log(JSON.stringify({ mode: "retry-pending", fixed: res.fixed.length, detail: res.fixed.slice(0, 20) }, null, 1));
+} else if (backfillMode) {
+  const until = arg("until") === true ? undefined : arg("until");
+  if (!until) throw new Error("--backfill requires an explicit --until YYYY-MM-DD");
+  const planInput = {
+    since: (arg("since") === true ? undefined : arg("since")) ?? DEFAULT_BACKFILL_SINCE,
+    until,
+    batchDays: Number(arg("batch-days", DEFAULT_BACKFILL_BATCH_DAYS)),
+  };
+  const priorState = dryRun ? {} : await loadBackfillState(s3, cfg.lawsBucket);
+  const plan = backfillPlan(priorState, planInput);
+  const window = backfillWindow(plan);
+  if (!window) {
+    console.log(JSON.stringify({ mode: "backfill", plan, window: null, complete: true }, null, 1));
+  } else {
+    const res = await crawl({
+      s3,
+      bucket: cfg.lawsBucket,
+      lookbackDays: cfg.flkLookbackDays,
+      pageSize: cfg.flkPageSize,
+      since: window.start,
+      until: window.end,
+      codes: arg("codes") ? String(arg("codes")).split(",").map(Number) : undefined,
+      dryRun,
+      tz: cfg.flkTz,
+      rateMs: cfg.flkRateMs,
+      stateKey: BACKFILL_STATE_KEY,
+      keyPrefix: "incremental/backfill",
+      sourceNote: "flk-backfill",
+    });
+    if (!dryRun) advanceBackfill(res.state, window, until, res.manifest.byCode);
+    if (!dryRun) await saveBackfillState(s3, cfg.lawsBucket, res.state);
+    console.log(JSON.stringify({
+      mode: dryRun ? "dry-run" : "backfill",
+      plan: { ...plan, window },
+      manifest: res.manifest,
+      complete: dryRun ? false : res.state.backfill.complete,
+    }, null, 1));
+  }
 } else {
   const res = await crawl({
     s3,
@@ -31,6 +73,7 @@ if (retryMode) {
     pageSize: cfg.flkPageSize,
     rateMs: cfg.flkRateMs,
     since: arg("since") === true ? undefined : arg("since"),
+    until: arg("until") === true ? undefined : arg("until"),
     codes: arg("codes") ? String(arg("codes")).split(",").map(Number) : undefined,
     dryRun,
     tz: cfg.flkTz,

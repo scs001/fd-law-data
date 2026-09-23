@@ -40,3 +40,6 @@ coverage/
 **/settings.local.json
 .opencode/
 .impeccable/
+
+# Local SQLite scratch databases
+/daas.db

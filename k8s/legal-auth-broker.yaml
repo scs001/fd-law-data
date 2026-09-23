@@ -1,0 +1,177 @@
+# Auth Broker manifests. IMAGE must be replaced by an immutable Jenkins sha tag.
+# All credentials are injected with Secrets; none are stored in this manifest.
+# The browser UI has containerPort 6080 but deliberately has no Service or
+# Ingress: use kubectl port-forward, Tailscale or an authenticated internal
+# ingress. The lease API uses a ClusterIP reachable only inside the cluster.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: legal-auth-rmfyalk-acct001-profile
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: legal-auth-broker
+    app.kubernetes.io/part-of: finddata
+    legal.finddata.io/source: rmfyalk-case-library
+    legal.finddata.io/account: acct001
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: legal-auth-rmfyalk-acct001-login
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: legal-auth-broker
+    app.kubernetes.io/part-of: finddata
+    legal.finddata.io/source: rmfyalk-case-library
+    legal.finddata.io/account: acct001
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: legal-auth-broker
+        legal.finddata.io/source: rmfyalk-case-library
+        legal.finddata.io/account: acct001
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: auth-broker
+          image: 100.64.0.8:30880/lawcraw_business/legal-auth-broker:IMAGE_SHA_TAG
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: novnc
+              containerPort: 6080
+          env:
+            - name: LEGAL_AUTH_PROFILE_ROOT
+              value: /data/legal-auth/profiles
+            - name: LEGAL_AUTH_BROKER_TOKEN
+              valueFrom:
+                secretKeyRef: { name: legal-auth-broker, key: broker-token }
+            - name: LEGAL_AUTH_JAR_KEY
+              valueFrom:
+                secretKeyRef: { name: legal-auth-broker, key: jar-key }
+            - name: LEGAL_AUTH_VNC_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: legal-auth-broker, key: vnc-password }
+            - name: LEGAL_AUTH_LOGIN_PROXY_ID
+              valueFrom:
+                secretKeyRef: { name: legal-identity-rmfyalk-acct001, key: login_proxy_id }
+            - name: LEGAL_AUTH_CRAWL_PROXY_ID
+              valueFrom:
+                secretKeyRef: { name: legal-identity-rmfyalk-acct001, key: crawl_proxy_id }
+            - name: LEGAL_AUTH_LOGIN_PROXY_URL
+              valueFrom:
+                secretKeyRef: { name: legal-identity-rmfyalk-acct001, key: login_proxy_url }
+            - name: REQUIRE_LOGIN_PROXY
+              value: "1"
+            - name: RUSTFS_ENDPOINT
+              value: "http://100.64.0.11:9000"
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-secret-key }
+            - name: RUSTFS_REGION
+              value: "us-east-1"
+            - name: LAWS_BUCKET
+              value: "laws"
+          command:
+            - node
+            - bin/legal-auth-broker.mjs
+            - login
+            - --source
+            - rmfyalk-case-library
+            - --account-id
+            - acct001
+            - --timeout-ms
+            - "3600000"
+          volumeMounts:
+            - name: browser-profile
+              mountPath: /data/legal-auth/profiles
+          resources:
+            requests: { cpu: "500m", memory: 1Gi }
+            limits: { cpu: "1", memory: 2Gi }
+      volumes:
+        - name: browser-profile
+          persistentVolumeClaim:
+            claimName: legal-auth-rmfyalk-acct001-profile
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legal-auth-broker
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: legal-auth-broker
+    app.kubernetes.io/part-of: finddata
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: legal-auth-broker }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: legal-auth-broker
+        app.kubernetes.io/part-of: finddata
+    spec:
+      containers:
+        - name: lease-api
+          image: 100.64.0.8:30880/lawcraw_business/legal-auth-broker:IMAGE_SHA_TAG
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8787
+          env:
+            - name: LEGAL_AUTH_BROKER_TOKEN
+              valueFrom:
+                secretKeyRef: { name: legal-auth-broker, key: broker-token }
+            - name: LEGAL_AUTH_JAR_KEY
+              valueFrom:
+                secretKeyRef: { name: legal-auth-broker, key: jar-key }
+            - name: RUSTFS_ENDPOINT
+              value: "http://100.64.0.11:9000"
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-secret-key }
+            - name: RUSTFS_REGION
+              value: "us-east-1"
+            - name: LAWS_BUCKET
+              value: "laws"
+          command: ["node", "bin/legal-auth-broker.mjs", "serve", "--host", "0.0.0.0"]
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: "100m", memory: 128Mi }
+            limits: { cpu: "500m", memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: legal-auth-broker
+  namespace: scraw
+  labels:
+    app.kubernetes.io/name: legal-auth-broker
+    app.kubernetes.io/part-of: finddata
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: legal-auth-broker }
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
