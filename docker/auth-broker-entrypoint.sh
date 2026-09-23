@@ -26,9 +26,16 @@ wait_for_x() {
 wait_for_x
 
 # VNC listens only on loopback; websockify bridges it to the in-pod noVNC port.
-x11vnc -display "$DISPLAY" -forever -shared -rfbport 5900 \
-  ${LEGAL_AUTH_VNC_PASSWORD:+-passwd "$LEGAL_AUTH_VNC_PASSWORD"} \
-  ${LEGAL_AUTH_VNC_PASSWORD:- -nopw} >/tmp/x11vnc.log 2>&1 &
+# Prefer -rfbauth so the password never appears in process arguments.
+X11VNC_ARGS="-display $DISPLAY -forever -shared -rfbport 5900"
+if [ -n "${LEGAL_AUTH_VNC_PASSWORD:-}" ]; then
+  x11vnc -storepasswd "$LEGAL_AUTH_VNC_PASSWORD" /tmp/legal-auth-vncpass
+  chmod 600 /tmp/legal-auth-vncpass
+  X11VNC_ARGS="$X11VNC_ARGS -rfbauth /tmp/legal-auth-vncpass"
+else
+  X11VNC_ARGS="$X11VNC_ARGS -nopw"
+fi
+x11vnc $X11VNC_ARGS >/tmp/x11vnc.log 2>&1 &
 X11VNC_PID=$!
 
 websockify --web=/usr/share/novnc 6080 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
