@@ -10,7 +10,10 @@ ENV NODE_ENV=production \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       xvfb x11vnc novnc websockify xdotool procps tini \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /tmp/.X11-unix /tmp/xdg \
+ && chmod 1777 /tmp/.X11-unix \
+ && chmod 700 /tmp/xdg
 
 WORKDIR /app
 COPY package.json package-lock.json ./

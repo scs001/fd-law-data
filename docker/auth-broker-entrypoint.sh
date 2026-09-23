@@ -6,8 +6,11 @@ set -eu
 
 export DISPLAY="${DISPLAY:-:99}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/xdg}"
-mkdir -p "$XDG_RUNTIME_DIR"
-chmod 700 "$XDG_RUNTIME_DIR"
+# Non-root Xvfb will not create the socket directory itself; the image ships it
+# 1777, and this fallback covers older mounts.
+mkdir -p /tmp/.X11-unix /tmp/xdg 2>/dev/null || true
+chmod 1777 /tmp/.X11-unix 2>/dev/null || true
+chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
 
 Xvfb :99 -screen 0 1440x900x24 -nolisten tcp &
 XVFB_PID=$!

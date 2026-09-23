@@ -50,8 +50,8 @@ async function commandServe() {
   const operations = createPgIdentityOperations(client);
   await operations.ensureSchema();
   const store = createS3SessionStore({ s3: s3FromEnv(), bucket: loadConfig().lawsBucket });
-  const port = Number(arg("port", process.env.LEGAL_AUTH_BROKER_PORT ?? 8787));
-  const host = arg("host", process.env.LEGAL_AUTH_BROKER_HOST ?? "127.0.0.1");
+  const port = Number(arg("port", process.env.LEGAL_AUTH_BROKER_LISTEN_PORT ?? 8787));
+  const host = arg("host", process.env.LEGAL_AUTH_BROKER_LISTEN_HOST ?? "127.0.0.1");
   if (!process.env.LEGAL_AUTH_BROKER_TOKEN) {
     throw new Error("LEGAL_AUTH_BROKER_TOKEN is required");
   }

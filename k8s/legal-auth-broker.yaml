@@ -40,9 +40,12 @@ spec:
         legal.finddata.io/account: acct001
     spec:
       restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 1001
       containers:
         - name: auth-broker
-          image: 100.64.0.8:30880/lawcraw_business/legal-auth-broker:IMAGE_SHA_TAG
+          image: 100.64.0.8:30880/lawcraw_business/legal-auth-broker:sha-4e5250d
           imagePullPolicy: IfNotPresent
           ports:
             - name: novnc
@@ -82,7 +85,19 @@ spec:
               value: "us-east-1"
             - name: LAWS_BUCKET
               value: "laws"
-          command:
+            - name: PG_HOST
+              value: "100.64.0.5"
+            - name: PG_PORT
+              value: "5432"
+            - name: PG_DATABASE
+              value: "law_db"
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef: { name: flk-law-pg-credentials, key: pg-user }
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: flk-law-pg-credentials, key: pg-password }
+          args:
             - node
             - bin/legal-auth-broker.mjs
             - login
@@ -123,7 +138,7 @@ spec:
     spec:
       containers:
         - name: lease-api
-          image: 100.64.0.8:30880/lawcraw_business/legal-auth-broker:IMAGE_SHA_TAG
+          image: 100.64.0.8:30880/lawcraw_business/legal-auth-broker:sha-4e5250d
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -147,7 +162,19 @@ spec:
               value: "us-east-1"
             - name: LAWS_BUCKET
               value: "laws"
-          command: ["node", "bin/legal-auth-broker.mjs", "serve", "--host", "0.0.0.0"]
+            - name: PG_HOST
+              value: "100.64.0.5"
+            - name: PG_PORT
+              value: "5432"
+            - name: PG_DATABASE
+              value: "law_db"
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef: { name: flk-law-pg-credentials, key: pg-user }
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: flk-law-pg-credentials, key: pg-password }
+          args: ["node", "bin/legal-auth-broker.mjs", "serve", "--host", "0.0.0.0", "--port", "8787"]
           readinessProbe:
             httpGet: { path: /health, port: http }
             initialDelaySeconds: 3
