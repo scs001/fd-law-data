@@ -14,6 +14,7 @@ import {
   validateSessionJar,
 } from "../lib/auth-broker/session-jar.js";
 import { probeSession } from "../lib/auth-broker/proxy.js";
+import { createProxyFetch } from "../lib/auth-broker/proxy-fetch.js";
 import { launchIdentityBrowser, captureBrowserState } from "../lib/auth-broker/browser-profile.js";
 import { captureRmfyalkSession } from "../lib/auth-broker/logins/rmfyalk.js";
 
@@ -125,7 +126,8 @@ async function commandLogin() {
     const loginProbe = await probeSession(jar, {
       purpose: "crawl",
       proxyId: jar.proxy.crawl_proxy_id,
-      fetchImpl: globalThis.fetch,
+      proxyUrl: crawlProxyUrl,
+      fetchImpl: createProxyFetch(crawlProxyUrl),
     });
     jar.probe = { crawl_proxy: loginProbe };
     validateSessionJar(jar);
@@ -173,9 +175,15 @@ async function commandProbe() {
   if (!stored) throw new Error("no stored session envelope");
   const { decryptSessionJar } = await import("../lib/auth-broker/session-jar.js");
   const jar = decryptSessionJar(stored.envelope, process.env.LEGAL_AUTH_JAR_KEY);
+  const purpose = arg("purpose", "crawl");
+  const proxyUrl = purpose === "login"
+    ? process.env.LEGAL_AUTH_LOGIN_PROXY_URL ?? null
+    : process.env.LEGAL_AUTH_CRAWL_PROXY_URL ?? process.env.LEGAL_AUTH_LOGIN_PROXY_URL ?? null;
   const probe = await probeSession(jar, {
-    purpose: arg("purpose", "crawl"),
-    proxyId: arg("purpose", "crawl") === "login" ? jar.proxy.login_proxy_id : jar.proxy.crawl_proxy_id,
+    purpose,
+    proxyId: purpose === "login" ? jar.proxy.login_proxy_id : jar.proxy.crawl_proxy_id,
+    proxyUrl,
+    fetchImpl: createProxyFetch(proxyUrl),
   });
   printSafe("probe", { source, account_id: accountId, probe });
   if (!probe.ok) process.exitCode = 42;

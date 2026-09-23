@@ -71,6 +71,9 @@ spec:
             - name: LEGAL_AUTH_LOGIN_PROXY_URL
               valueFrom:
                 secretKeyRef: { name: legal-identity-rmfyalk-acct001, key: login_proxy_url }
+            - name: LEGAL_AUTH_CRAWL_PROXY_URL
+              valueFrom:
+                secretKeyRef: { name: legal-identity-rmfyalk-acct001, key: crawl_proxy_url }
             - name: REQUIRE_LOGIN_PROXY
               value: "1"
             - name: RUSTFS_ENDPOINT
