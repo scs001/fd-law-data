@@ -200,5 +200,6 @@ try {
   }
 } catch (err) {
   console.error(`[legal-auth-broker] ${err.code ?? "ERROR"}: ${err.message}`);
+  if (process.env.LEGAL_AUTH_DEBUG_STACK === "1") console.error(err.stack ?? err);
   process.exitCode = 1;
 }
