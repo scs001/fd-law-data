@@ -134,7 +134,7 @@ async function commandLogin() {
 
     const store = createS3SessionStore({ s3: s3FromEnv(), bucket: loadConfig().lawsBucket });
     const envelope = encryptSessionJar(jar, process.env.LEGAL_AUTH_JAR_KEY);
-    await store.put(envelope);
+    await store.put(envelope, { source, accountId });
     const updated = await operations.upsertIdentity({
       source,
       account_id: accountId,
