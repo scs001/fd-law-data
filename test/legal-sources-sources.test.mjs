@@ -4,7 +4,7 @@ import { rmfyalkAdapter } from "../lib/legal-sources/sources/rmfyalk.js";
 import { mfaTreatyAdapter } from "../lib/legal-sources/sources/mfa-treaty.js";
 import { govRulesAdapter } from "../lib/legal-sources/sources/gov-rules.js";
 import { partyRegulationAdapter } from "../lib/legal-sources/sources/party-regulation.js";
-import { ccdiSupervisoryAdapter } from "../lib/legal-sources/sources/ccdi-supervisory.js";
+import { ccdiSupervisoryAdapter, parseCcdiListPage, parseCcdiDetailPage } from "../lib/legal-sources/sources/ccdi-supervisory.js";
 import { SOURCE_ADAPTERS } from "../lib/legal-sources/sources/index.js";
 
 test("all five wave-1 adapters share the runtime contract", () => {
@@ -104,22 +104,41 @@ test("mfa treaty parses server-rendered pagination, metadata and attachments", a
   assert.equal(detail.artifacts[0].filename, "treaty.pdf");
 });
 
-test("gov rules filters titles and maps lifecycle metadata", async () => {
-  const listHtml = `<ul>
-    <li><a href="/a.shtml">部门规章：XX管理办法</a></li>
-    <li><a href="/b.shtml">新闻：不相关</a></li>
-  </ul>`;
-  const page = await govRulesAdapter.list({ scope: "department" }, htmlHelper(listHtml));
+test("gov rules gateway enumerates regulations and maps metadata", async () => {
+  const gatewayJson = {
+    resultCode: { code: 200 },
+    result: {
+      data: {
+        pager: { total: 1, pageCount: 1, pageNo: 1, pageSize: 500 },
+        list: [{
+          f_202321360426: "XX管理办法",
+          f_202321807875: "部门规章",
+          f_202344311304: "令第15号",
+          f_202321915922: "2026-01-01 00:00:00",
+          f_202323394765: "国家卫生健康委",
+          f_202328191239: ["国家卫生健康委员会"],
+          f_202321423473: [],
+          f_20232380533: "",
+          doc_pub_url: "https://www.gov.cn/zhengce/202601/content_1.htm",
+          f_202321758948: "第一条 为了规范管理。",
+        }],
+      },
+    },
+  };
+  const page = await govRulesAdapter.list({ scope: "department", size: 500 }, jsonHelper(gatewayJson));
   assert.equal(page.entries.length, 1);
-  const detailHtml = `<h1>XX管理办法</h1>
-    <table><tr><th>发文字号</th><td>令第15号</td></tr>
-    <tr><th>发文机关</th><td>国家卫生健康委</td></tr>
-    <tr><th>施行日期</th><td>2026-02-01</td></tr>
-    <tr><th>有效性</th><td>现行有效</td></tr></table>`;
-  const detail = await govRulesAdapter.detail(page.entries[0], htmlHelper(detailHtml));
-  assert.equal(detail.document.authority, "国家卫生健康委");
+  assert.equal(page.total, 1);
+  assert.equal(page.entries[0].title, "XX管理办法");
+  assert.equal(page.entries[0].category, "部门规章");
+  assert.equal(page.entries[0].authority, "国家卫生健康委");
+  assert.equal(page.entries[0].url, "https://www.gov.cn/zhengce/202601/content_1.htm");
+
+  const detail = await govRulesAdapter.detail(page.entries[0]);
+  assert.equal(detail.document.title, "XX管理办法");
   assert.equal(detail.document.status, "现行有效");
   assert.equal(detail.document.metadata.document_no, "令第15号");
+  assert.equal(detail.document.metadata.department, "国家卫生健康委员会");
+  assert.equal(detail.document.content, "第一条 为了规范管理。");
 });
 
 test("party regulations exclude commentary and preserve category", async () => {
@@ -142,15 +161,32 @@ test("party regulations exclude commentary and preserve category", async () => {
   assert.equal(detail.document.metadata.category, "regulations");
 });
 
-test("CCDI challenge is structure drift, never parsed as content", async () => {
-  const challengePage = await ccdiSupervisoryAdapter.list({ page: 1 }, htmlHelper(`<script>window.open("/fgk/", "_self");</script>`));
-  assert.equal(challengePage.entries.length, 0);
-  assert.equal(challengePage.unreachablePages.length, 1);
-  assert.match(challengePage.unreachablePages[0].reason, /anti-automation challenge/);
-  assert.equal(challengePage.total, 0);
-  const listHtml = `<ul><li><a href="/fgk/a.shtml">监察法实施条例</a></li></ul>`;
-  const page = await ccdiSupervisoryAdapter.list({ page: 1 }, htmlHelper(listHtml));
+test("CCDI parser extracts entries, pagination and detail sections", () => {
+  const listHtml = `
+    <form name="searchFrom_5" action="law_display/253" method="post"></form>
+    <a onclick="submitForm_0(5)">监察法实施条例</a>
+    <script>submitForm_1(29, 29);</script>`;
+  const page = parseCcdiListPage(listHtml);
+  assert.equal(page.entries.length, 1);
+  assert.equal(page.entries[0].source_id, "253");
   assert.equal(page.entries[0].title, "监察法实施条例");
+  assert.equal(page.pages, 29);
+
+  const detailHtml = `
+    <h2 class="tit">监察法实施条例</h2>
+    <div>来源：国家监察委员会</div>
+    <div>发布时间：2021-09-20</div>
+    <div>分类：党内法规制度-->条例</div>
+    <div class="TRS_Editor"><p>第一条 为了加强监察工作。</p></div>
+    <!--endprint-->`;
+  const detail = parseCcdiDetailPage(detailHtml, page.entries[0]);
+  assert.equal(detail.title, "监察法实施条例");
+  assert.equal(detail.published_at, "2021-09-20");
+  assert.equal(detail.authority, "国家监察委员会");
+  assert.equal(detail.metadata.category, "党内法规制度-->条例");
+  assert.equal(detail.content, "第一条 为了加强监察工作。");
+
+  assert.throws(() => parseCcdiListPage(`<script>window.open("/fgk/","_self");document.cookie="C3VK=abc123; path=/;";</script>`), /challenge/);
 });
 
 function jsonHelper(json) {
