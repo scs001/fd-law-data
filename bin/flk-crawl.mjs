@@ -28,7 +28,7 @@ if (retryMode) {
   const res = await retryPending({ s3, bucket: cfg.lawsBucket, days: Number(arg("days", 14)), dryRun, rateMs: cfg.flkRateMs });
   console.log(JSON.stringify({ mode: "retry-pending", fixed: res.fixed.length, detail: res.fixed.slice(0, 20) }, null, 1));
 } else if (backfillMode) {
-  const until = arg("until") === true ? undefined : arg("until");
+  let until = arg("until") === true ? undefined : arg("until");
   if (!until) {
     // Scheduled backfill always targets the latest Beijing calendar day.
     until = new Intl.DateTimeFormat("en-CA", {
