@@ -66,10 +66,22 @@ CREATE TABLE IF NOT EXISTS legal_source_identity_event (
     event_kind IN (
       'identity_created', 'identity_updated', 'login', 'session_created',
       'probe', 'small_batch', 'lease_acquired', 'lease_released',
-      'lease_expired', 'failure', 'identity_retired'
+      'lease_expired', 'failure', 'identity_retired', 'mode_selected'
     )
   )
 );
 
 CREATE INDEX IF NOT EXISTS legal_source_identity_event_identity_time_idx
   ON legal_source_identity_event (identity_id, occurred_at DESC);
+
+-- Widen the event-kind check on clusters created before mode selection.
+ALTER TABLE legal_source_identity_event
+  DROP CONSTRAINT IF EXISTS legal_source_identity_event_kind_check;
+ALTER TABLE legal_source_identity_event
+  ADD CONSTRAINT legal_source_identity_event_kind_check CHECK (
+    event_kind IN (
+      'identity_created', 'identity_updated', 'login', 'session_created',
+      'probe', 'small_batch', 'lease_acquired', 'lease_released',
+      'lease_expired', 'failure', 'identity_retired', 'mode_selected'
+    )
+  );

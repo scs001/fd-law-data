@@ -110,3 +110,51 @@ test("cross-proxy stays disabled until both probes and small batch pass", () => 
     crawlProbe: { ok: true },
   }).mode, "browser_session_host_or_relay");
 });
+
+test("session alive on login proxy but dead on crawl proxy escalates to a broker-side mode", () => {
+  const base = { login_proxy_id: "login-a", crawl_proxy_id: "crawl-b" };
+  const probes = {
+    loginProbe: { ok: true, kind: "ok", checked_at: "2026-09-24T00:00:00Z" },
+    crawlProbe: { ok: false, kind: "login_required", reason: "source code 401", checked_at: "2026-09-24T00:00:01Z" },
+  };
+
+  const relayDecision = selectSessionMode({ ...base }, probes);
+  assert.equal(relayDecision.allowed, true);
+  assert.equal(relayDecision.mode, "proxy_bound_relay");
+  assert.match(relayDecision.reason, /fallback to proxy_bound_relay/);
+  assert.equal(relayDecision.probes.crawl.kind, "login_required");
+  assert.ok(relayDecision.decided_at);
+
+  const hostDecision = selectSessionMode({ ...base, browser_profile_ref: "legal-auth/x/y" }, probes);
+  assert.equal(hostDecision.mode, "browser_session_host");
+});
+
+test("a plain session expiry never escalates; both probes failing requires re-login", () => {
+  const decision = selectSessionMode(
+    { login_proxy_id: "proxy-a", crawl_proxy_id: "proxy-a" },
+    {
+      loginProbe: { ok: false, kind: "login_required", checked_at: "t" },
+      crawlProbe: { ok: false, kind: "login_required", checked_at: "t" },
+    },
+  );
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.mode, "session_jar");
+});
+
+test("operator-pinned relay and host modes are honored when the binding allows them", () => {
+  const sameProxy = { login_proxy_id: "proxy-a", crawl_proxy_id: "proxy-a" };
+  const pinnedRelay = selectSessionMode({ ...sameProxy, mode: "proxy_bound_relay" }, {});
+  assert.equal(pinnedRelay.allowed, true);
+  assert.equal(pinnedRelay.mode, "proxy_bound_relay");
+  assert.match(pinnedRelay.reason, /pins proxy_bound_relay/);
+
+  const pinnedHost = selectSessionMode({ ...sameProxy, mode: "browser_session_host" }, {});
+  assert.equal(pinnedHost.mode, "browser_session_host");
+
+  const blocked = selectSessionMode(
+    { login_proxy_id: "a", crawl_proxy_id: "b", mode: "proxy_bound_relay" },
+    { loginProbe: { ok: true }, crawlProbe: { ok: true } },
+  );
+  assert.equal(blocked.allowed, false);
+  assert.equal(blocked.mode, "proxy_bound_relay");
+});

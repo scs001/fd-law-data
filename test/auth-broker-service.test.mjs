@@ -52,6 +52,12 @@ function operations() {
       calls.push(["failure", source, accountId, reason, status]);
       return { ...current, status };
     },
+    async recordModeSelection({ source, accountId, mode, reason, probes }) {
+      calls.push(["mode", source, accountId, mode, reason]);
+      const previous = current.mode;
+      current = { ...current, mode };
+      return { ...current, __previousMode: previous, __probes: probes ?? null };
+    },
   };
 }
 
@@ -198,4 +204,158 @@ test("invalid JSON and unknown routes fail without exposing internals", async ()
   const unknown = await request(handler, "GET", "/nope");
   await unknown.done;
   assert.equal(unknown.res.statusCode, 404);
+});
+
+const jarFixture = {
+  version: 1,
+  source: "rmfyalk-case-library",
+  account_id: "acct001",
+  mode: "session_jar",
+  auth: { headerName: "x-token", userToken: "relay-secret" },
+  storageState: { cookies: [{ name: "c", value: "v", domain: ".court.gov.cn" }] },
+  browser: { userAgent: "UA" },
+  proxy: { login_proxy_id: "proxy-a", crawl_proxy_id: "proxy-a" },
+};
+
+function leasedIdentity(extra = {}) {
+  return {
+    ...identity(),
+    mode: "proxy_bound_relay",
+    lease_expires_at: "2999-01-01T00:00:00Z",
+    ...extra,
+  };
+}
+
+function operationsFor(startIdentity) {
+  const ops = operations();
+  ops.object = () => startIdentity;
+  ops.getIdentity = async ({ source, accountId }) => {
+    ops.calls.push(["get", source, accountId]);
+    return startIdentity.source === source && startIdentity.account_id === accountId ? startIdentity : null;
+  };
+  ops.acquireLease = async ({ owner }) => {
+    ops.calls.push(["acquire", startIdentity.source, startIdentity.account_id, owner]);
+    return {
+      lease: { token: startIdentity.lease_token, owner, expires_at: startIdentity.lease_expires_at },
+      identity: startIdentity,
+    };
+  };
+  return ops;
+}
+
+test("/mode requires the active lease, records the selection and returns artifacts", async () => {
+  const start = leasedIdentity({ mode: "session_jar" });
+  const ops = operationsFor(start);
+  const handler = createAuthBrokerHandler({ operations: ops, brokerToken: TOKEN });
+
+  const response = await request(handler, "POST", "/mode", {
+    body: {
+      source: "rmfyalk-case-library",
+      account_id: "acct001",
+      lease_token: "lease-token",
+      mode: "proxy_bound_relay",
+      reason: "session unusable from crawl proxy",
+      probes: { login: { ok: true }, crawl: { ok: false, kind: "login_required" } },
+    },
+  });
+  await response.done;
+  assert.equal(response.res.statusCode, 200);
+  const body = JSON.parse(response.res.body);
+  assert.equal(body.mode, "proxy_bound_relay");
+  assert.equal(body.previous_mode, "session_jar");
+  assert.equal(body.switched, true);
+  assert.deepEqual(body.relay, { path: "/relay" });
+  assert.deepEqual(ops.calls.at(-1), ["mode", "rmfyalk-case-library", "acct001", "proxy_bound_relay", "session unusable from crawl proxy"]);
+
+  const wrongLease = await request(handler, "POST", "/mode", {
+    body: { source: "rmfyalk-case-library", account_id: "acct001", lease_token: "other", mode: "session_jar" },
+  });
+  await wrongLease.done;
+  assert.equal(wrongLease.res.statusCode, 409);
+
+  const invalidMode = await request(handler, "POST", "/mode", {
+    body: { source: "rmfyalk-case-library", account_id: "acct001", lease_token: "lease-token", mode: "teleport" },
+  });
+  await invalidMode.done;
+  assert.equal(invalidMode.res.statusCode, 400);
+});
+
+test("/relay injects the leased session server-side and hides session material", async () => {
+  const envelope = encryptSessionJar(jarFixture, KEY);
+  const ops = operationsFor(leasedIdentity());
+  let upstream;
+  const handler = createAuthBrokerHandler({
+    operations: ops,
+    sessionStore: sessionStore(envelope),
+    brokerToken: TOKEN,
+    jarKey: KEY,
+    relayFetch: async (call) => {
+      upstream = call;
+      return {
+        status: 200,
+        headers: { "content-type": "application/json" },
+        body: Buffer.from(JSON.stringify({ code: "0" })),
+      };
+    },
+  });
+
+  const response = await request(handler, "POST", "/relay", {
+    body: {
+      source: "rmfyalk-case-library",
+      account_id: "acct001",
+      lease_token: "lease-token",
+      method: "POST",
+      url: "https://rmfyalk.court.gov.cn/cpws_al_api/api/cpwsAl/search",
+      headers: { "content-type": "application/json", cookie: "spoofed=1" },
+      body: JSON.stringify({ page: 1 }),
+    },
+  });
+  await response.done;
+  assert.equal(response.res.statusCode, 200);
+  assert.equal(upstream.url, "https://rmfyalk.court.gov.cn/cpws_al_api/api/cpwsAl/search");
+  assert.equal(upstream.headers["x-token"], "relay-secret");
+  assert.equal(upstream.headers.cookie, "c=v");
+  assert.equal(upstream.headers["content-type"], "application/json");
+
+  const body = JSON.parse(response.res.body);
+  assert.equal(body.status, 200);
+  assert.deepEqual(JSON.parse(body.body_text), { code: "0" });
+  assert.equal(JSON.stringify(body).includes("relay-secret"), false);
+
+  const mismatch = await request(handler, "POST", "/relay", {
+    body: { source: "rmfyalk-case-library", account_id: "acct001", lease_token: "stale", url: "https://rmfyalk.court.gov.cn/x" },
+  });
+  await mismatch.done;
+  assert.equal(mismatch.res.statusCode, 409);
+
+  const badUrl = await request(handler, "POST", "/relay", {
+    body: { source: "rmfyalk-case-library", account_id: "acct001", lease_token: "lease-token", url: "http://10.1.0.4:9/x" },
+  });
+  await badUrl.done;
+  assert.equal(badUrl.res.statusCode, 400);
+});
+
+test("/relay is unavailable without egress config and acquire withholds jars for non-jar modes", async () => {
+  const ops = operationsFor(leasedIdentity());
+  const noRelay = createAuthBrokerHandler({ operations: ops, brokerToken: TOKEN, sessionStore: sessionStore(encryptSessionJar(jarFixture, KEY)), jarKey: KEY });
+  const refused = await request(noRelay, "POST", "/relay", {
+    body: { source: "rmfyalk-case-library", account_id: "acct001", lease_token: "lease-token", url: "https://rmfyalk.court.gov.cn/x" },
+  });
+  await refused.done;
+  assert.equal(refused.res.statusCode, 503);
+
+  const handler = createAuthBrokerHandler({
+    operations: ops,
+    sessionStore: sessionStore(encryptSessionJar(jarFixture, KEY)),
+    brokerToken: TOKEN,
+    jarKey: KEY,
+  });
+  const acquire = await request(handler, "POST", "/lease/acquire", {
+    body: { source: "rmfyalk-case-library", account_id: "acct001", owner: "crawler-1", include_session: true },
+  });
+  await acquire.done;
+  const body = JSON.parse(acquire.res.body);
+  assert.equal(body.mode, "proxy_bound_relay");
+  assert.equal(body.session_jar, null);
+  assert.deepEqual(body.relay, { path: "/relay" });
 });

@@ -60,6 +60,10 @@ async function commandServe() {
     operations,
     sessionStore: store,
     brokerToken: process.env.LEGAL_AUTH_BROKER_TOKEN,
+    jarKey: process.env.LEGAL_AUTH_JAR_KEY,
+    // Proxy-bound Relay egress: the login proxy when configured, otherwise the
+    // pod's own egress. The relay only serves the leased identity's source.
+    relayFetch: createRelayEgress(),
     log: (event) => console.error(JSON.stringify(event)),
   }, { host, port });
   console.log(JSON.stringify({ serving: true, host, port }, null, 1));
@@ -70,6 +74,36 @@ async function commandServe() {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+}
+
+function createRelayEgress() {
+  const proxyUrl = process.env.LEGAL_AUTH_RELAY_PROXY_URL
+    ?? process.env.LEGAL_AUTH_LOGIN_PROXY_URL
+    ?? null;
+  if (proxyUrl) {
+    const proxyFetch = createProxyFetch(proxyUrl, { timeoutMs: 120_000 });
+    return async ({ url, method, headers, body }) => {
+      const response = await proxyFetch(url, {
+        method,
+        headers,
+        body: body && body.length ? body : undefined,
+      });
+      return {
+        status: response.status,
+        headers: response.headers ?? {},
+        body: Buffer.from(await response.text()),
+      };
+    };
+  }
+  return async ({ url, method, headers, body }) => {
+    const response = await fetch(url, {
+      method,
+      headers,
+      body: body && body.length ? body : undefined,
+      signal: AbortSignal.timeout(120_000),
+    });
+    return { status: response.status, headers: Object.fromEntries(response.headers), body: Buffer.from(await response.arrayBuffer()) };
+  };
 }
 
 async function commandLogin() {
