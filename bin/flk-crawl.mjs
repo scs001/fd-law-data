@@ -29,7 +29,12 @@ if (retryMode) {
   console.log(JSON.stringify({ mode: "retry-pending", fixed: res.fixed.length, detail: res.fixed.slice(0, 20) }, null, 1));
 } else if (backfillMode) {
   const until = arg("until") === true ? undefined : arg("until");
-  if (!until) throw new Error("--backfill requires an explicit --until YYYY-MM-DD");
+  if (!until) {
+    // Scheduled backfill always targets the latest Beijing calendar day.
+    until = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(new Date());
+  }
   const planInput = {
     since: (arg("since") === true ? undefined : arg("since")) ?? DEFAULT_BACKFILL_SINCE,
     until,
