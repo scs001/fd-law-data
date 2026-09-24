@@ -61,7 +61,10 @@ if (retryMode) {
       keyPrefix: "incremental/backfill",
       sourceNote: "flk-backfill",
     });
-    if (!dryRun) advanceBackfill(res.state, window, until, res.manifest.byCode);
+    if (!dryRun) advanceBackfill(res.state, window, until, res.manifest.byCode, {
+      since: plan.since,
+      batchDays: plan.batchDays,
+    });
     if (!dryRun) await saveBackfillState(s3, cfg.lawsBucket, res.state);
     console.log(JSON.stringify({
       mode: dryRun ? "dry-run" : "backfill",
