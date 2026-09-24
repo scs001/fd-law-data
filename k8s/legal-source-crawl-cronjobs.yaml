@@ -95,7 +95,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b79ec5
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b7186e
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
@@ -152,7 +152,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b79ec5
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b7186e
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
@@ -197,7 +197,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b79ec5
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b7186e
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
@@ -254,7 +254,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b79ec5
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b7186e
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
@@ -299,7 +299,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b79ec5
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b7186e
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
@@ -356,7 +356,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b79ec5
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b7186e
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
@@ -401,7 +401,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b79ec5
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b7186e
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
@@ -458,7 +458,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b79ec5
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b7186e
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
@@ -503,7 +503,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b79ec5
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b7186e
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
@@ -559,7 +559,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: report
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b79ec5
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b7186e
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
@@ -603,7 +603,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b79ec5
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-4b7186e
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
