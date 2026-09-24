@@ -33,6 +33,8 @@ spec:
               image: 100.64.0.8:30880/lawcraw_business/legal-auth-broker:sha-4b79ec5
               imagePullPolicy: IfNotPresent
               env:
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
                   value: "http://100.64.0.11:9000"
                 - name: RUSTFS_ACCESS_KEY
@@ -95,9 +97,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-dcbf412
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
               imagePullPolicy: IfNotPresent
               env:
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
                   value: "http://100.64.0.11:9000"
                 - name: RUSTFS_ACCESS_KEY
@@ -140,7 +144,7 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      activeDeadlineSeconds: 14400
+      activeDeadlineSeconds: 28800
       template:
         metadata:
           labels:
@@ -152,9 +156,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-dcbf412
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
               imagePullPolicy: IfNotPresent
               env:
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
                   value: "http://100.64.0.11:9000"
                 - name: RUSTFS_ACCESS_KEY
@@ -197,9 +203,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-dcbf412
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
               imagePullPolicy: IfNotPresent
               env:
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
                   value: "http://100.64.0.11:9000"
                 - name: RUSTFS_ACCESS_KEY
@@ -242,7 +250,7 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      activeDeadlineSeconds: 14400
+      activeDeadlineSeconds: 28800
       template:
         metadata:
           labels:
@@ -254,9 +262,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-dcbf412
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
               imagePullPolicy: IfNotPresent
               env:
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
                   value: "http://100.64.0.11:9000"
                 - name: RUSTFS_ACCESS_KEY
@@ -299,9 +309,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-dcbf412
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
               imagePullPolicy: IfNotPresent
               env:
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
                   value: "http://100.64.0.11:9000"
                 - name: RUSTFS_ACCESS_KEY
@@ -344,7 +356,7 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      activeDeadlineSeconds: 14400
+      activeDeadlineSeconds: 28800
       template:
         metadata:
           labels:
@@ -356,9 +368,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-dcbf412
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
               imagePullPolicy: IfNotPresent
               env:
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
                   value: "http://100.64.0.11:9000"
                 - name: RUSTFS_ACCESS_KEY
@@ -401,9 +415,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-dcbf412
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
               imagePullPolicy: IfNotPresent
               env:
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
                   value: "http://100.64.0.11:9000"
                 - name: RUSTFS_ACCESS_KEY
@@ -446,7 +462,7 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      activeDeadlineSeconds: 14400
+      activeDeadlineSeconds: 28800
       template:
         metadata:
           labels:
@@ -458,9 +474,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-dcbf412
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
               imagePullPolicy: IfNotPresent
               env:
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
                   value: "http://100.64.0.11:9000"
                 - name: RUSTFS_ACCESS_KEY
@@ -503,9 +521,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-dcbf412
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
               imagePullPolicy: IfNotPresent
               env:
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
                   value: "http://100.64.0.11:9000"
                 - name: RUSTFS_ACCESS_KEY
@@ -559,9 +579,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: report
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-dcbf412
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
               imagePullPolicy: IfNotPresent
               env:
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
                   value: "http://100.64.0.11:9000"
                 - name: RUSTFS_ACCESS_KEY
@@ -603,9 +625,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-dcbf412
+              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
               imagePullPolicy: IfNotPresent
               env:
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
                   value: "http://100.64.0.11:9000"
                 - name: RUSTFS_ACCESS_KEY
