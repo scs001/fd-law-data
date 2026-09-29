@@ -67,6 +67,14 @@ const clearBan = !!arg("clear-ban"); // human says the ban is resolved; start pr
 // never the full text. One request per five documents instead of one per document —
 // the traffic profile this account can sustain.
 const metaOnly = !!arg("meta-only");
+// Duty cycle: crawl at most --on-minutes continuously, then rest --off-minutes.
+// The account was re-banned after ~2 h of continuous listing, so the shape of the
+// activity matters as much as its volume: bursts separated by long silences look
+// far less like a scraper than a steady stream.
+const onMinutes = Number(arg("on-minutes", 0));
+const offMinutes = Number(arg("off-minutes", 0));
+// Pause between list-page turns (ms), passed to the crawl children.
+const pageMs = Number(arg("page-ms", 0));
 // Crawl only inside this local window ("22:00-09:00", wrapping midnight). The
 // account is the thing that gets banned, so the footprint is bounded by hours of
 // activity per day, not by throughput. Off by default (24/7 backlog runs).
@@ -308,6 +316,7 @@ async function probeTab(tab) {
 
 // --------------------------------------------------------------- child process
 function runChild(args, extraEnv = {}, timeoutMs = 0) {
+  if (pageMs > 0) extraEnv = { WENSHU_PAGE_MS: String(pageMs), ...extraEnv };
   return new Promise((resolve) => {
     const child = spawn("node", args, { cwd: ROOT, env: { ...process.env, ...extraEnv } });
     let out = "";
@@ -401,7 +410,10 @@ function markBanned(detail) {
     log(`still banned (${detail})`);
   }
   state.sessionInvalid = true;
-  state.banBackoffMs = Math.min((state.banBackoffMs ?? 6 * 3600 * 1000) * 2, 24 * 3600 * 1000);
+  // "or", not "nullish coalesce": a --clear-ban restart leaves 0 here, and 0 * 2 = 0
+  // made the rare probe fire every loop iteration (~20 s), hammering the site with
+  // a banned account all night. The first probe after a ban is at least 6 h away.
+  state.banBackoffMs = Math.min((state.banBackoffMs || 6 * 3600 * 1000) * 2, 24 * 3600 * 1000);
   // One probe every 6-24 h: enough to notice an appealed or switched account,
   // far too sparse to matter to a site that has already flagged the account.
   state.banProbeAt = Date.now() + state.banBackoffMs;
@@ -412,6 +424,8 @@ function markBanned(detail) {
 async function runCycle(whyRaw) {
   const startedAt = new Date().toISOString();
   const t0 = Date.now();
+  state.lastCycleStart = Date.now();
+  persist();
   if (!(await ensureChrome())) return false;
 
   const gateTab = await keepalive(); // fresh load: the DOM is only trustworthy after one
@@ -489,7 +503,8 @@ async function runCycle(whyRaw) {
         "bin/wenshu-crawl.mjs", "--cdp-raw", CDP,
         "--since", spec.since, "--until", spec.until,
         "--no-regions", "--result-cap", String(resultCap), "--case-types", caseTypes,
-        "--rate-ms", String(rateMs), "--max-pages", String(maxPages), "--budget-ms", String(budgetMs),
+        "--rate-ms", String(rateMs), "--max-pages", String(maxPages),
+        "--budget-ms", String(onMinutes > 0 ? Math.min(budgetMs, onMinutes * 60 * 1000 + 5 * 60 * 1000) : budgetMs),
         "--worker-id", spec.workerId,
       ];
       if (metaOnly) args.push("--no-details");
@@ -625,11 +640,14 @@ while (true) {
       // Mid-backlog (a day cursor is set) the next day starts right away; only the
       // steady state — where the cursor was retired — waits for the nightly slot.
       const backlogLeft = Object.values(state.cursors ?? {}).some((d) => d >= (state.floor ?? "9999-99-99"));
+      const owedRest = onMinutes > 0 && state.lastCycleStart && now - state.lastCycleStart >= onMinutes * 60 * 1000;
       nextAtMs = clean
         ? backlogLeft
-          ? inCrawlWindow()
-            ? now + 10 * 1000
-            : (log(`outside the crawl window${windowArg && windowArg !== true ? ` ${windowArg}` : ""} — pausing`), nextWindowStart())
+          ? owedRest
+            ? (log(`duty cycle: ${onMinutes} min of crawling done — resting ${offMinutes || 60} min`), now + (offMinutes || 60) * 60 * 1000)
+            : inCrawlWindow()
+              ? now + 10 * 1000
+              : (log(`outside the crawl window${windowArg && windowArg !== true ? ` ${windowArg}` : ""} — pausing`), nextWindowStart())
           : nextAt()
         : state.accountBannedAt
           ? Math.max(now + 60 * 1000, state.banProbeAt ?? 0)
