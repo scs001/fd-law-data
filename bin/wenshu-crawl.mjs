@@ -232,6 +232,14 @@ try {
     courtLevels: arg("no-details") ? courtLevelCodes : [],
     docTypes: arg("no-details") ? docTypeCodes : [],
     reasonAxes,
+    // 案由 one level deeper: the raw-CDP adapter can look up any branch's own
+    // children in the jstree, so a still-over-cap level-2 branch (民事 合同纠纷)
+    // subdivides instead of being recorded as a shortfall. A failed tree read
+    // degrades to [] — the slicer falls through to date-halving/overflow.
+    childrenOfReason:
+      globalThis.__wenshuCdpAdapter && typeof globalThis.__wenshuCdpAdapter.reasonBranches === "function"
+        ? (code) => globalThis.__wenshuCdpAdapter.reasonBranches(code).catch(() => [])
+        : null,
     dryRun,
   });
   console.log(JSON.stringify({ mode: dryRun ? "dry-run" : "crawl", manifest: res.manifest }, null, 1));
