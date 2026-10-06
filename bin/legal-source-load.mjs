@@ -7,9 +7,10 @@ import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { loadConfig } from "../lib/config.js";
 import { createS3 } from "../lib/s3.js";
-import { loadLegalDocuments } from "../lib/legal-sources/document-loader.js";
+import { effectiveBodyStats, loadLegalDocuments } from "../lib/legal-sources/document-loader.js";
 import { SOURCE_ADAPTERS } from "../lib/legal-sources/sources/index.js";
 import { structuredPrefix } from "../lib/legal-sources/storage.js";
+import { errorHead, finishRun, startRun, telemetrySourceName } from "../lib/telemetry.mjs";
 
 // Bounded defaults for the data-machine network shape (loader pod -> RustFS /
 // Windows PG across Tailscale). All are env-overridable so a k8s Job can be
@@ -42,6 +43,26 @@ export async function main({ source: defaultSource, argv = [] } = {}) {
   if (!source || source === true) {
     throw new Error(`--source is required; known: ${[...SOURCE_ADAPTERS.keys()].join(", ")}`);
   }
+  // Federation telemetry under the CronJob name (not the library id); never
+  // throws, so the load's exit code is untouched by reporting problems.
+  const runId = await startRun({ source: telemetrySourceName(source, "load") });
+  try {
+    const summary = await runLoad({ source: String(source), argv });
+    await finishRun(runId, {
+      status: "success",
+      // rows_written = rows this load actually upserted; the quality caliber
+      // matches the daily report (effective-body ratio over folded records).
+      rowsWritten: (summary.inserted ?? 0) + (summary.updated ?? 0),
+      metrics: summary.metrics,
+    });
+    return summary;
+  } catch (err) {
+    await finishRun(runId, { status: "failed", rowsWritten: 0, errorHead: errorHead(err) });
+    throw err;
+  }
+}
+
+async function runLoad({ source, argv }) {
   const cfg = loadConfig();
   const dryRun = !!arg(argv, "dry-run");
   const concurrency = Math.max(1, intEnv("LEGAL_LOAD_CONCURRENCY", DEFAULTS.concurrency));
@@ -142,6 +163,7 @@ export async function main({ source: defaultSource, argv = [] } = {}) {
       prefix,
       partFiles: objects.length,
       recordsRead,
+      metrics: effectiveBodyStats(records),
       ...result,
     };
     console.log(JSON.stringify(summary, null, 1));

@@ -9,6 +9,7 @@
 import { loadConfig } from "../lib/config.js";
 import { createS3 } from "../lib/s3.js";
 import { crawl, sweepColumn, noticeTitles, defaultFetchPage } from "../lib/guidecases/crawler.js";
+import { errorHead, finishRun, startRun, telemetrySourceName } from "../lib/telemetry.mjs";
 
 function arg(name, def) {
   const i = process.argv.indexOf(`--${name}`);
@@ -45,6 +46,15 @@ if (listOnly) {
       ? { endpoint: "https://dry-run.invalid", accessKey: "dry", secretKey: "run" }
       : { endpoint: cfg.s3Endpoint, accessKey: cfg.s3AccessKey, secretKey: cfg.s3SecretKey, region: cfg.s3Region },
   );
-  const { manifest } = await crawl({ s3, bucket, prefix, rateMs, dryRun, limit, fetchPage });
-  console.log(JSON.stringify({ mode: dryRun ? "dry-run" : "crawl", bucket, prefix, manifest }, null, 1));
+  // Federation telemetry under the CronJob name; never throws, so reporting
+  // trouble cannot change this script's exit code.
+  const runId = await startRun({ source: telemetrySourceName("guide-cases") });
+  try {
+    const { manifest } = await crawl({ s3, bucket, prefix, rateMs, dryRun, limit, fetchPage });
+    await finishRun(runId, { status: "success", rowsWritten: manifest.emitted ?? 0 });
+    console.log(JSON.stringify({ mode: dryRun ? "dry-run" : "crawl", bucket, prefix, manifest }, null, 1));
+  } catch (err) {
+    await finishRun(runId, { status: "failed", rowsWritten: 0, errorHead: errorHead(err) });
+    throw err;
+  }
 }

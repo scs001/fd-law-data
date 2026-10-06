@@ -8,6 +8,7 @@ import { crawlLegalSource } from "../lib/legal-sources/runtime.js";
 import { getSourceAdapter, SOURCE_ADAPTERS } from "../lib/legal-sources/sources/index.js";
 import { withCrawlerIdentity } from "../lib/auth-broker/client.js";
 import { createProxyFetch } from "../lib/auth-broker/proxy-fetch.js";
+import { errorHead, finishRun, startRun, telemetrySourceName } from "../lib/telemetry.mjs";
 
 function arg(argv, name, def) {
   const i = argv.indexOf(`--${name}`);
@@ -21,8 +22,27 @@ export async function main({ source: defaultSource, argv = [] } = {}) {
   if (!source || source === true) {
     throw new Error(`--source is required; known: ${[...SOURCE_ADAPTERS.keys()].join(", ")}`);
   }
-  const cfg = loadConfig();
   const adapter = getSourceAdapter(String(source));
+  // Federation telemetry: report under the CronJob name, not the library id.
+  // startRun/finishRun never throw, so the crawl's exit code is untouched.
+  const runId = await startRun({ source: telemetrySourceName(source, "crawl") });
+  try {
+    const result = await runCrawl({ source: String(source), adapter, argv });
+    await finishRun(runId, {
+      status: "success",
+      // rows_written for a crawl = emitted snapshot entries (unique records
+      // this run fetched and wrote to the structured prefix).
+      rowsWritten: result.records.length,
+    });
+    return result;
+  } catch (err) {
+    await finishRun(runId, { status: "failed", rowsWritten: 0, errorHead: errorHead(err) });
+    throw err;
+  }
+}
+
+async function runCrawl({ source, adapter, argv }) {
+  const cfg = loadConfig();
   const dryRun = !!arg(argv, "dry-run");
   const s3 = dryRun
     ? { getObject: async () => null, putObject: async () => ({}) }
