@@ -38,6 +38,13 @@ export async function main() {
   }
 }
 
+// undici 全局 keep-alive 连接池在部分端点（如直连 RustFS）下会让事件循环滞留，
+// 工作完成后任务永不退出（k8s 侧表现为 deadline 假失败）。stdout 冲刷后确定性退出。
+async function exitCleanly() {
+  await new Promise((resolve) => process.stdout.write("", () => resolve()));
+  process.exit(process.exitCode ?? 0);
+}
+
 function invokedDirectly() {
   const entry = process.argv[1];
   return entry && import.meta.url === pathToFileURL(entry).href;
@@ -50,4 +57,5 @@ if (invokedDirectly()) {
     console.error(`[legal-sources-report] FATAL: ${err?.stack ?? err}`);
     process.exitCode = 1;
   }
+  await exitCleanly();
 }
