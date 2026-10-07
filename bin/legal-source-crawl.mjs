@@ -9,6 +9,12 @@ import { crawlLegalSource, parseEntriesOverride } from "../lib/legal-sources/run
 import { getSourceAdapter, SOURCE_ADAPTERS } from "../lib/legal-sources/sources/index.js";
 import { withCrawlerIdentity } from "../lib/auth-broker/client.js";
 import { createProxyFetch } from "../lib/auth-broker/proxy-fetch.js";
+import {
+  loadPlatformSessionJar,
+  mapPlatformSessionJar,
+  platformSessionInjection,
+  resolveCrawlProxyUrl,
+} from "../lib/legal-sources/platform-session.js";
 import { errorHead, finishRun, startRun, telemetrySourceName } from "../lib/telemetry.mjs";
 
 function arg(argv, name, def) {
@@ -96,7 +102,16 @@ async function runCrawl({ source, adapter, argv }) {
   };
 
   const accountId = arg(argv, "account-id") === true ? undefined : arg(argv, "account-id");
-  const crawlProxyUrl = process.env.LEGAL_AUTH_CRAWL_PROXY_URL ?? null;
+  // Egress priority: the platform dispatcher injects the leased identity's
+  // exit as standard proxy env (curl-native via createProxyFetch); the
+  // broker-era variable stays as the fallback so a fallback run is unchanged.
+  const crawlProxyUrl = resolveCrawlProxyUrl(process.env);
+  // Dual session source (law-auth-session-consumption): platform injection
+  // (inline FD_SESSION_JAR / file FD_SESSION_JAR_PATH) wins and never requests
+  // a broker lease; without it the broker path below is unchanged.
+  if (platformSessionInjection(process.env)) {
+    return runPlatformSessionCrawl({ source, crawlOptions, crawlProxyUrl, accountId, dryRun });
+  }
   if (!accountId) {
     const result = await crawlLegalSource(crawlOptions);
     console.log(JSON.stringify({
@@ -135,6 +150,37 @@ async function runCrawl({ source, adapter, argv }) {
         },
       });
       return crawl;
+    },
+  });
+  console.log(JSON.stringify({
+    mode: dryRun ? "dry-run" : "crawl",
+    manifest: result.manifest,
+    emitted: result.records.length,
+  }, null, 1));
+  return result;
+}
+
+// Platform mode: map the injected jar onto the existing auth-header structure
+// (authHeadersFromSessionJar via platform-session.js) and run the same crawl
+// runtime over the platform egress. No broker lease is acquired or released.
+async function runPlatformSessionCrawl({ source, crawlOptions, crawlProxyUrl, accountId, dryRun }) {
+  const jar = loadPlatformSessionJar({ env: process.env });
+  const mapped = mapPlatformSessionJar(jar, { source: String(source) });
+  const identityAlias = process.env.FD_ACCOUNT ?? (typeof accountId === "string" ? accountId : null);
+  console.error(
+    `[${source}] platform session mode: account=${identityAlias ?? "unknown"} `
+    + `egress=${process.env.FD_EGRESS_REF ?? (crawlProxyUrl ? "standard proxy env" : "direct")}`,
+  );
+  const result = await crawlLegalSource({
+    ...crawlOptions,
+    authHeaders: mapped.headers,
+    fetchImpl: createProxyFetch(crawlProxyUrl),
+    auth: {
+      broker: null,
+      accountId: identityAlias,
+      mode: "platform_session_jar",
+      fingerprint: mapped.fingerprint,
+      probe: null,
     },
   });
   console.log(JSON.stringify({
