@@ -456,3 +456,11 @@ Secret `wenshu-crawl-credentials` keys: `rustfs-access-key`,
 account values enter ONLY via local-only kubectl/values — never committed. PG
 credentials never enter the crawler. The loader runs wherever `wenshu_db` is
 reachable (data machine / tailnet PG per `.env`).
+
+
+## 联邦直报（legal-line-federation）
+
+每个 crawl/load bin 通过 `lib/telemetry.mjs` 向平台 crawl_runs 直报（start/finish）。
+- 环境：`FD_CRAWL_DB_URL`（缺失时优雅 no-op）；`FD_PENDING_RUN_ID`（dispatcher 触发时注入，用于取消血缘）；`FD_RUNNER_IMAGE_TAG`。
+- 平台托管 schema 时设 `FD_SCHEMA_MANAGED=1` 禁用 telemetry 的 DDL 自愈。
+- 报到失败重试 2 次后放行，绝不改变爬取/装载退出码。
