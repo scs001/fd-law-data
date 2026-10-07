@@ -50,12 +50,15 @@ Object layout is deliberately append-only:
 
 ```text
 legal-sources/<source>/
-  structured/run-YYYY-MM-DD-partNNN.jsonl
+  structured/run-<runId>-partNNN.jsonl     # runId=UTC YYYYMMDDHHMMSS；旧 run-<date> 分片恒排前（fold 兼容）
   manifest/run-YYYY-MM-DD-<runid>.manifest.json
   raw/<source_id>/...                     # response/HTML snapshots
   attachments/<source_id>/...             # PDF/docx; DB stores keys, not blobs
   state.json                              # hashes, retry queue, watermark
 ```
+
+定向重抓（跳过列表、full 语义、hash 相等也落盘）：`node bin/ccdi-supervisory-crawl.mjs --entries <file|comma>`；
+适配器需实现 entryFromId，无则改用 JSON/JSONL 完整 entry 文件。
 
 `legal_documents` has a unique `(source, source_id)` key. Unchanged hashes are
 skipped; changed hashes update in place. The loader only writes this table and

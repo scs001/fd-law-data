@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Unified crawl entry for wave-1 legal sources. The crawler writes object
 // storage only; it never holds PG credentials.
+import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "../lib/config.js";
 import { createS3 } from "../lib/s3.js";
-import { crawlLegalSource } from "../lib/legal-sources/runtime.js";
+import { crawlLegalSource, parseEntriesOverride } from "../lib/legal-sources/runtime.js";
 import { getSourceAdapter, SOURCE_ADAPTERS } from "../lib/legal-sources/sources/index.js";
 import { withCrawlerIdentity } from "../lib/auth-broker/client.js";
 import { createProxyFetch } from "../lib/auth-broker/proxy-fetch.js";
@@ -15,6 +16,18 @@ function arg(argv, name, def) {
   if (i < 0) return def;
   const value = argv[i + 1];
   return value && !value.startsWith("--") ? value : true;
+}
+
+// --entries accepts either an inline comma-separated source-id list or a file
+// (an existing path) holding that list or a JSON/JSONL document of full
+// entries. A path-looking value that is not there fails loudly instead of
+// being mistaken for an id. Exported for tests.
+export function readEntriesSpec(value) {
+  if (value === true) throw new Error("--entries requires a file path or comma-separated source ids");
+  const spec = String(value);
+  if (existsSync(spec)) return readFileSync(spec, "utf8");
+  if (/[/\\]/.test(spec) && !spec.includes(",")) throw new Error(`--entries file not found: ${spec}`);
+  return spec;
 }
 
 export async function main({ source: defaultSource, argv = [] } = {}) {
@@ -58,12 +71,24 @@ async function runCrawl({ source, adapter, argv }) {
     size: Number(arg(argv, "size", 10)),
     maxPages: Number(arg(argv, "max-pages", 1000)),
   };
+  // --entries targets specific source_ids (or full entries from a file): the
+  // list phase is skipped entirely and the run uses full semantics, so an
+  // unchanged hash can never suppress the write. Manifest / state.json /
+  // telemetry stay the same path as any other crawl.
+  const entriesValue = arg(argv, "entries");
+  const entries = entriesValue === undefined
+    ? null
+    : parseEntriesOverride(readEntriesSpec(entriesValue), adapter);
+  if (entries) {
+    console.error(`[${source}] --entries override: ${entries.length} entr(y|ies), full semantics (list phase skipped)`);
+  }
   const crawlOptions = {
     s3,
     bucket: cfg.lawsBucket,
     source: String(source),
     adapter,
-    mode: arg(argv, "full") ? "full" : "incremental",
+    mode: entries || arg(argv, "full") ? "full" : "incremental",
+    entries,
     filters,
     dryRun,
     rateMs: Number(arg(argv, "rate-ms", adapter.rateMs)),

@@ -16,6 +16,8 @@ import {
 } from "../lib/legal-sources/sources/ccdi-supervisory.js";
 import { docxToText } from "../lib/docxtext.js";
 import { SOURCE_ADAPTERS } from "../lib/legal-sources/sources/index.js";
+import { crawlLegalSource } from "../lib/legal-sources/runtime.js";
+import { LocalS3 } from "./fixtures/local-s3.mjs";
 
 test("all five wave-1 adapters share the runtime contract", () => {
   assert.deepEqual([...SOURCE_ADAPTERS.keys()].sort(), [
@@ -414,6 +416,118 @@ test("CCDI parser rejects the 请求过于频繁 block page instead of emitting 
   const blockHtml = `<html><body><div class="main">您的访问请求过于频繁，请稍后再试。</div></body></html>`;
   assert.throws(() => parseCcdiDetailPage(blockHtml, { source_id: "1", title: "x", url: "u" }),
     (err) => err.name === "SessionProxyError" && /rate-limit/.test(err.message));
+});
+
+test("CCDI list parser rejects the rate-limit page instead of returning zero entries", () => {
+  const blockHtml = `<html><body><div class="main">您的访问请求过于频繁，请稍后再试。</div></body></html>`;
+  assert.throws(() => parseCcdiListPage(blockHtml),
+    (err) => err.name === "SessionProxyError" && /rate-limit/.test(err.message));
+});
+
+// List fixture: one form + anchor pair per entry, plus the pagination script
+// the parser reads the total page count from.
+function ccdiListPage(ids, totalPages = 1) {
+  return `<html><body>
+    ${ids.map((id, index) => `<form name="searchFrom_${index}" action="law_display/${id}" method="post"></form>
+      <a onclick="submitForm_0(${index})">法规${id}</a>`).join("\n")}
+    <script>submitForm_1(${totalPages}, ${totalPages});</script></body></html>`;
+}
+
+function ccdiListClient(pagesHtml) {
+  return {
+    request: async (url) => {
+      const page = new URL(url).searchParams.get("p");
+      if (pagesHtml[page] === undefined) throw new Error(`unexpected CCDI list page ${page}`);
+      return pagesHtml[page];
+    },
+  };
+}
+
+test("CCDI list flags an empty page as unreachable instead of silently dropping its entries", async () => {
+  const adapter = createCcdiSupervisoryAdapter({
+    client: ccdiListClient({
+      1: ccdiListPage(["101", "102"], 3),
+      // Soft block / partial render: valid HTML, no forms, no block wording.
+      2: `<html><body><div>系统繁忙</div><script>submitForm_1(3, 3);</script></body></html>`,
+      3: ccdiListPage(["103"], 3),
+    }),
+    rateMs: 0,
+  });
+  const listed = await adapter.list({});
+  assert.deepEqual(listed.entries.map((entry) => entry.source_id), ["101", "102", "103"]);
+  assert.equal(listed.pages, 3);
+  assert.equal(listed.unreachablePages.length, 1);
+  assert.equal(listed.unreachablePages[0].page, 2);
+  assert.match(listed.unreachablePages[0].reason, /no entries/);
+});
+
+test("CCDI list flags a short non-final page, but accepts a short last page", async () => {
+  const adapter = createCcdiSupervisoryAdapter({
+    client: ccdiListClient({
+      1: ccdiListPage(["201", "202"], 3),
+      2: ccdiListPage(["203"], 3), // width 2 expected, got 1
+      3: ccdiListPage(["204"], 3), // last page may be short
+    }),
+    rateMs: 0,
+  });
+  const listed = await adapter.list({});
+  assert.deepEqual(listed.entries.map((entry) => entry.source_id), ["201", "202", "203", "204"]);
+  assert.equal(listed.unreachablePages.length, 1);
+  assert.equal(listed.unreachablePages[0].page, 2);
+  assert.match(listed.unreachablePages[0].reason, /short list page: 1 < 2/);
+});
+
+test("CCDI list throws the block page up for every page, not just page 1", async () => {
+  const blockHtml = `<html><body>您的访问请求过于频繁，请稍后再试。</body></html>`;
+  const adapter = createCcdiSupervisoryAdapter({
+    client: ccdiListClient({ 1: ccdiListPage(["301", "302"], 2), 2: blockHtml }),
+    rateMs: 0,
+  });
+  await assert.rejects(
+    () => adapter.list({}),
+    (err) => err.name === "SessionProxyError" && /rate-limit/.test(err.message),
+  );
+});
+
+test("a soft-blocked CCDI list page reaches the run manifest as complete=false", async () => {
+  const s3 = new LocalS3();
+  const detailHtml = `<html><body><H2 class=tit>法规</H2><DIV class=TRS_Editor><p>第一条 正文。</p></DIV></body></html>`;
+  const adapter = createCcdiSupervisoryAdapter({
+    client: {
+      request: async (url) => {
+        const page = new URL(url).searchParams.get("p");
+        if (page === "1") return ccdiListPage(["401", "402"], 2);
+        if (page === "2") return `<html><body><div>系统繁忙</div><script>submitForm_1(2, 2);</script></body></html>`;
+        if (url.includes("/law_display/")) return detailHtml;
+        throw new Error(`unexpected CCDI request ${url}`);
+      },
+      requestBuffer: async () => { throw new Error("unexpected attachment"); },
+    },
+    rateMs: 0,
+  });
+  const result = await crawlLegalSource({ s3, bucket: "laws", source: adapter.id, adapter, rateMs: 0 });
+  assert.deepEqual(result.records.map((record) => record.source_id), ["401", "402"]);
+  assert.equal(result.manifest.coverage.complete, false);
+  assert.equal(result.manifest.coverage.unreachablePages.length, 1);
+  assert.equal(result.manifest.coverage.unreachablePages[0].page, 2);
+});
+
+test("CCDI adapter resolves a bare catalog id into a detail entry", async () => {
+  const pageHtml = `<html><body><H2 class=tit>监察法实施条例</H2><DIV class=TRS_Editor><p>第一条 正文。</p></DIV></body></html>`;
+  const entry = ccdiSupervisoryAdapter.entryFromId("253");
+  assert.equal(entry.source_id, "253");
+  assert.match(entry.url, /\/fgk\/law_display\/253$/);
+  assert.equal(entry.doc_type, "supervisory-regulation");
+  assert.throws(() => ccdiSupervisoryAdapter.entryFromId("law_display/253"), /invalid CCDI source id/);
+
+  const adapter = createCcdiSupervisoryAdapter({
+    client: { request: async () => pageHtml, requestBuffer: async () => { throw new Error("unexpected attachment"); } },
+    rateMs: 0,
+  });
+  const detail = await adapter.detail(entry);
+  assert.equal(detail.document.source_id, "253");
+  assert.equal(detail.document.title, "监察法实施条例");
+  assert.equal(detail.document.source_url, entry.url);
 });
 
 test("CCDI client resets, backs off once and recovers from a rate-limit block", async () => {
