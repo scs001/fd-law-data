@@ -9,10 +9,10 @@ FROM docker.m.daocloud.io/library/node:22-slim
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Tencent's apt mirror over plain http: the daocloud slim base ships no
-# system CA store, so https mirrors fail handshake (apt package integrity is
-# GPG-verified regardless of transport).
-RUN sed -i 's|https://deb.debian.org|http://mirrors.cloud.tencent.com|g' /etc/apt/sources.list.d/debian.sources \
+# USTC's apt mirror over plain http: the daocloud slim base ships no system
+# CA store (https mirrors fail handshake), and Tencent's own mirror 302s to
+# https. apt package integrity is GPG-verified regardless of transport.
+RUN sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
  && apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
