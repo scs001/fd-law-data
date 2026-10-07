@@ -1,9 +1,17 @@
 # fd-law-data crawler image (flk incremental crawl; no PG client-side need
 # beyond the loader which runs on the data machine, not in this image).
+# curl is required by lib/auth-broker/proxy-fetch.js: identity-bound egress
+# (rmfyalk platform session) shells out to curl for its TLS fingerprint;
+# without it every proxied request fails with "spawn curl ENOENT" and the
+# crawl silently reports listed=0 (page-level failure, not fatal).
 FROM docker.m.daocloud.io/library/node:22-slim
 
 WORKDIR /app
 ENV NODE_ENV=production
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-fund --no-audit --registry=https://registry.npmmirror.com
