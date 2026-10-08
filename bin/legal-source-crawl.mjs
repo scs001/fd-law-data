@@ -44,7 +44,13 @@ export async function main({ source: defaultSource, argv = [] } = {}) {
   const adapter = getSourceAdapter(String(source));
   // Federation telemetry: report under the CronJob name, not the library id.
   // startRun/finishRun never throw, so the crawl's exit code is untouched.
-  const runId = await startRun({ source: telemetrySourceName(source, "crawl") });
+  // The platform dispatcher injects FD_ACCOUNT — carry it into the crawl_runs
+  // row so runs are traceable to the leased identity (task 5.2 acceptance).
+  const identityAlias = process.env.FD_ACCOUNT ?? null;
+  const runId = await startRun({
+    source: telemetrySourceName(source, "crawl"),
+    identityAlias,
+  });
   try {
     const result = await runCrawl({ source: String(source), adapter, argv });
     await finishRun(runId, {
