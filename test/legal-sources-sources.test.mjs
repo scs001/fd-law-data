@@ -272,7 +272,11 @@ test("party regulations exclude commentary and preserve category", async () => {
     <p>第一条 为了强化巡视工作。</p>`;
   const detail = await partyRegulationAdapter.detail(page.entries[0], htmlHelper(detailHtml));
   assert.match(detail.document.source_id, /^https:\/\/www\.12371\.cn\/2026\/01\/01\/ARTItl1\.shtml@v-[0-9a-f]{20}$/);
+  // State is keyed by the canonical url (what the list side carries); the row
+  // id stays versioned so each revision is its own row.
+  assert.equal(detail.document.state_key, page.entries[0].source_id);
   assert.equal(detail.document.metadata.canonical_url, page.entries[0].source_id);
+  assert.equal(detail.document.metadata.canonical_source_id, page.entries[0].source_id);
   assert.equal(detail.document.metadata.is_current, true);
   assert.equal(detail.document.authority, "中共中央");
   assert.equal(detail.document.metadata.category, "regulations");
