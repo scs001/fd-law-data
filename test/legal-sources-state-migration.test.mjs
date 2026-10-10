@@ -4,8 +4,10 @@
 // The identity key of three legal sources changed, so their state.json keys are
 // dead weight (rmfyalk held 17,461 one-shot token keys, 2.1 MB). Task 2.5 keeps
 // that from ever growing silently again; task 2.6 rebuilds the state under the
-// new keys from the newest run's part files so the first post-fix run does not
-// pay a full crawl.
+// new keys from the run parts AND from the old state's own keys, so the first
+// post-fix run does not pay a full crawl. The old state matters because it
+// holds documents no surviving part mentions (production gov-rules: 10,573
+// state keys against 6- and 194-record runs).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { LocalS3 } from "./fixtures/local-s3.mjs";
@@ -22,9 +24,11 @@ import {
 } from "../lib/legal-sources/state.js";
 import { crawlLegalSource } from "../lib/legal-sources/runtime.js";
 import { stateKey, structuredPartKey } from "../lib/legal-sources/storage.js";
+import { canonicalUrlKey } from "../lib/legal-sources/sources/gov-rules.js";
 import {
   classifyPartKeys,
   commitRebuild,
+  keyDerivationFor,
   parseArgs,
   parsePartLines,
   planRebuild,
@@ -36,6 +40,7 @@ import {
 const BUCKET = "laws";
 const RMFYALK = "rmfyalk-case-library";
 const PARTY = "party-regulation-library";
+const GOV = "gov-rules-library";
 
 // ── task 2.5: bounded state size ───────────────────────────────────────────
 
@@ -170,8 +175,12 @@ test("the rebuild CLI parses one source and rejects a valueless flag", () => {
   // parseArgs is permissive about WHICH sources exist; run() validates against
   // the registry and refuses to rewrite the fleet unless --all is explicit.
   const opts = parseArgs(["--source", RMFYALK, "--dry-run", "--limit", "2"]);
-  assert.deepEqual(opts, { source: RMFYALK, all: false, dryRun: true, limit: 2, help: false });
+  assert.deepEqual(opts, { source: RMFYALK, all: false, allRuns: true, dryRun: true, limit: 2, help: false });
   assert.equal(parseArgs(["--all"]).all, true);
+  // All runs is the default; --newest-run-only is the escape hatch back.
+  assert.equal(parseArgs(["--source", RMFYALK]).allRuns, true);
+  assert.equal(parseArgs(["--source", RMFYALK, "--newest-run-only"]).allRuns, false);
+  assert.equal(parseArgs(["--source", RMFYALK, "--newest-run-only", "--all-runs"]).allRuns, true);
   assert.throws(() => parseArgs(["--source"]), /--source/);
   assert.throws(() => parseArgs(["--wat"]), /unknown or incomplete argument/);
 });
@@ -199,8 +208,24 @@ test("a torn tail line is skipped, not fatal", () => {
   assert.equal(malformed, 1);
 });
 
-// Seed one source's newest run with NDJSON parts plus a state keyed the OLD
-// way. Case numbers (rmfyalk) and canonical URLs (party) are the new keys.
+test("every registered source has a key derivation; an unregistered one is identity", () => {
+  // A registered source without a derivation would silently rebuild on
+  // whatever source_id the parts hold — exactly the bug this script fixes —
+  // so the table is exhaustive by construction and this test pins that.
+  for (const source of ["rmfyalk-case-library", "mfa-treaty-library", "gov-rules-library", "party-regulation-library", "ccdi-supervisory-regulations"]) {
+    assert.ok(keyDerivationFor(source), `${source} must have a derivation`);
+  }
+  assert.equal(keyDerivationFor("rmfyalk-case-library").scheme, "case_no");
+  assert.equal(keyDerivationFor("party-regulation-library").scheme, "canonical_article_url");
+  assert.equal(keyDerivationFor("gov-rules-library").scheme, "canonical_url");
+  // Unknown (test-only) sources keep the old behaviour: the key IS source_id.
+  assert.equal(keyDerivationFor("multi-run-source").scheme, "source_id");
+});
+
+// Seed one source's run with NDJSON parts plus a state keyed the OLD way.
+// Records carry only the fields the pre-fix adapters wrote: the new key must
+// be DERIVED from those (metadata.case_no for rmfyalk, canonical_source_id for
+// party), never read off source_id.
 async function seedSource(s3, { source, runId = "20261008120000", parts }) {
   for (const [index, records] of parts.entries()) {
     const body = records.map((record) => JSON.stringify(record)).join("\n") + "\n";
@@ -208,16 +233,28 @@ async function seedSource(s3, { source, runId = "20261008120000", parts }) {
   }
 }
 
+// Pre-fix rmfyalk record: source_id is the rotating token, the case number
+// lives in metadata (the adapter has always written it).
+function rmfyalkRecord(token, caseNo, hash, publishedAt = null) {
+  return {
+    source: RMFYALK,
+    source_id: token,
+    content_hash: hash,
+    published_at: publishedAt,
+    metadata: { case_no: caseNo },
+  };
+}
+
 function rmfyalkParts() {
   return [[
-    { source: RMFYALK, source_id: "2026-13-2-167-004", content_hash: "h-case-1", published_at: "2026-03-01" },
-    { source: RMFYALK, source_id: "2026-13-2-167-005", content_hash: "h-case-2", published_at: "2026-04-01" },
+    rmfyalkRecord("tok-AAA%3D", "2026-13-2-167-004", "h-case-1", "2026-03-01"),
+    rmfyalkRecord("tok-BBB%3D", "2026-13-2-167-005", "h-case-2", "2026-04-01"),
   ], [
-    { source: RMFYALK, source_id: "2026-13-2-167-006", content_hash: "h-case-3" },
+    rmfyalkRecord("tok-CCC%3D", "2026-13-2-167-006", "h-case-3"),
   ]];
 }
 
-test("rebuild keys the state by the new identity and drops the old keys", async () => {
+test("rmfyalk rebuild keys the state by case number, dropping the rotating tokens", async () => {
   const s3 = new LocalS3();
   await seedSource(s3, { source: RMFYALK, parts: rmfyalkParts() });
   // Old state: rotating token keys, plus a failure on one of them.
@@ -233,7 +270,10 @@ test("rebuild keys the state by the new identity and drops the old keys", async 
 
   assert.equal(plan.oldKeys, 2);
   assert.equal(plan.newKeys, 3);
-  assert.equal(plan.droppedKeys, 2);
+  // A token has no path back to a case number: every old key is unmappable.
+  assert.equal(plan.mappedFromOldState, 0);
+  assert.equal(plan.droppedUnmappable, 2);
+  assert.equal(plan.mappedFromParts, 3);
   assert.equal(plan.partsRead, 2);
   assert.equal(plan.droppedFailures, 1);
 
@@ -247,9 +287,33 @@ test("rebuild keys the state by the new identity and drops the old keys", async 
   assert.equal(stored.watermark, "2026-04-01");
   assert.equal(stored.rebuild.fromRunId, "20261008120000");
   assert.equal(stored.rebuild.previousHashKeys, 2);
+  assert.equal(stored.rebuild.keyScheme, "case_no");
   // Result is readable from the summary alone.
-  assert.ok(lines.join("\n").includes("new hash keys     : 3"));
-  assert.ok(lines.join("\n").includes("backup            : legal-sources/rmfyalk-case-library/state.json.bak-20261010090000"));
+  const summary = lines.join("\n");
+  assert.match(summary, /old state keys\s*: 2/);
+  assert.match(summary, /mapped from old state\s*: 0/);
+  assert.match(summary, /mapped from parts\s*: 3/);
+  assert.match(summary, /dropped unmappable\s*: 2/);
+  assert.match(summary, /new state keys\s*: 3/);
+  assert.match(summary, /backup\s*: legal-sources\/rmfyalk-case-library\/state.json.bak-20261010090000/);
+});
+
+test("a rmfyalk part record without a case number is skipped, never keyed by its token", async () => {
+  const s3 = new LocalS3();
+  await seedSource(s3, {
+    source: RMFYALK,
+    parts: [[
+      rmfyalkRecord("tok-AAA%3D", "2026-13-2-167-004", "h-case-1"),
+      // No metadata.case_no: the record has no stable identity to rebuild on.
+      { source: RMFYALK, source_id: "tok-NOKEY%3D", content_hash: "h-orphan" },
+    ]],
+  });
+
+  const plan = await rebuildSource({ s3, bucket: BUCKET, source: RMFYALK, stamp: "20261010090000", log: () => {} });
+  assert.equal(plan.skippedNoKey, 1);
+  const stored = JSON.parse((await s3.getObject(BUCKET, stateKey(RMFYALK))).toString("utf8"));
+  assert.deepEqual(Object.keys(stored.hashes), ["2026-13-2-167-004"]);
+  assert.ok(!("tok-NOKEY%3D" in stored.hashes), "the token must never become a state key");
 });
 
 test("rebuild is idempotent: a second run yields the same state", async () => {
@@ -275,8 +339,12 @@ test("rebuild is idempotent: a second run yields the same state", async () => {
   const stripMarker = (state) => JSON.stringify({ ...state, rebuild: null }, null, 1);
   assert.equal(stripMarker(secondState), stripMarker(firstState));
 
-  // A second run drops nothing: every key it reads is already a new key.
-  assert.equal(second.droppedKeys, 0);
+  // The second pass reads a state this script already rebuilt (keyScheme
+  // marker), so its keys translate to themselves: nothing is dropped as
+  // old-key junk and every key still comes back.
+  assert.equal(second.alreadyMigrated, true);
+  assert.equal(second.droppedUnmappable, 0);
+  assert.equal(second.mappedFromOldState, 3);
   assert.equal(second.newKeys, 3);
   assert.deepEqual(Object.keys(secondState.hashes), Object.keys(firstState.hashes));
 });
@@ -344,46 +412,118 @@ test("dry-run writes nothing and still reports what would change", async () => {
   assert.deepEqual([...after.keys()], [...before.keys()], "no object added, removed or replaced");
   const summary = lines.join("\n");
   assert.match(summary, /dry-run \(nothing written\)/);
-  assert.match(summary, /old hash keys     : 1/);
-  assert.match(summary, /new hash keys     : 3/);
-  assert.match(summary, /backup would be   : legal-sources\/rmfyalk-case-library\/state.json.bak-20261010090000 \(cleanup is manual\)/);
+  assert.match(summary, /old state keys\s*: 1/);
+  assert.match(summary, /dropped unmappable\s*: 1/);
+  assert.match(summary, /new state keys\s*: 3/);
+  assert.match(summary, /backup would be\s*: legal-sources\/rmfyalk-case-library\/state.json.bak-20261010090000 \(cleanup is manual\)/);
 });
 
-test("party regulations rebuild onto the canonical URL, not the versioned row id", async () => {
+test("party rebuilds onto the canonical URL, translating old @v-hash keys and records", async () => {
   const s3 = new LocalS3();
   const article = "http://news.12371.cn/2015/03/12/ARTI1426127349457326.shtml";
+  const other = "http://news.12371.cn/2016/01/05/ARTI1451968000000000.shtml";
   await seedSource(s3, {
     source: PARTY,
     runId: "20261008120000",
     parts: [[
-      // Versioned source_id (one row per revision) + state_key (canonical URL):
-      // the rebuild must use the same key the runtime's stateKeyOf() picks.
-      { source: PARTY, source_id: `${article}@v-aaaaaaaaaaaaaaaaaaaa`, state_key: article, content_hash: "h-v1" },
-      { source: PARTY, source_id: `${article}@v-bbbbbbbbbbbbbbbbbbbb`, state_key: article, content_hash: "h-v2" },
+      // Pre-fix record: versioned source_id + metadata.canonical_source_id
+      // (the adapter has always written it); the key must come from metadata.
+      { source: PARTY, source_id: `${article}@v-aaaaaaaaaaaaaaaaaaaa`, content_hash: "h-v1", metadata: { canonical_source_id: article } },
+      { source: PARTY, source_id: `${article}@v-bbbbbbbbbbbbbbbbbbbb`, content_hash: "h-v2", metadata: { canonical_source_id: article } },
+      // No metadata: fall back to stripping @v-<hash> from source_id.
+      { source: PARTY, source_id: `${other}@v-cccccccccccccccccccc`, content_hash: "h-other" },
     ]],
   });
+  // Old state: the detail side wrote URL@v-hash keys the list side never read.
   const old = emptyState(PARTY);
   rememberSuccess(old, { sourceId: `${article}@v-00000000000000000000`, hash: "h-old" });
+  rememberSuccess(old, { sourceId: `${other}@v-11111111111111111111`, hash: "h-old-other" });
+  // A third document appears in no available part: its old-state hash is the
+  // only evidence that it was ever fetched, and it must survive the merge.
+  const stateOnly = "http://news.12371.cn/2018/07/01/ARTI1530400000000000.shtml";
+  rememberSuccess(old, { sourceId: `${stateOnly}@v-22222222222222222222`, hash: "h-state-only" });
   await s3.putObject(BUCKET, stateKey(PARTY), JSON.stringify(old, null, 1));
 
-  await rebuildSource({ s3, bucket: BUCKET, source: PARTY, stamp: "20261010090000", log: () => {} });
+  const plan = await rebuildSource({ s3, bucket: BUCKET, source: PARTY, stamp: "20261010090000", log: () => {} });
   const stored = JSON.parse((await s3.getObject(BUCKET, stateKey(PARTY))).toString("utf8"));
 
-  assert.deepEqual(Object.keys(stored.hashes), [article], "keyed by the canonical URL the list side looks up");
+  assert.deepEqual(Object.keys(stored.hashes).sort(), [article, other, stateOnly].sort(), "keyed by the canonical URL the list side looks up");
   assert.equal(stored.hashes[article], "h-v2", "the newest part wins per key, as the loader fold does");
+  assert.equal(stored.hashes[other], "h-other", "the @v- strip fallback keyed the record without metadata");
+  assert.equal(stored.hashes[stateOnly], "h-state-only", "a document only the old state knew keeps its hash");
+  // Old @v-hash keys are mappable: URL part, hashes kept (part evidence wins).
+  assert.equal(plan.mappedFromOldState, 3);
+  assert.equal(plan.droppedUnmappable, 0);
+  assert.equal(plan.mappedFromParts, 2);
   assert.equal(stateKeyOf({ source_id: `${article}@v-x`, state_key: article }), article);
+});
+
+test("gov-rules collapses http/https onto one key, keeping the hash values", async () => {
+  const s3 = new LocalS3();
+  const https = "https://www.gov.cn/zhengce/2016-05/30/content_5721412.htm";
+  const http = "http://www.gov.cn/zhengce/2016-05/30/content_5721412.htm";
+  await seedSource(s3, {
+    source: GOV,
+    runId: "20261008120000",
+    parts: [[
+      // The same document served under both schemes across runs (production:
+      // one run held 7,945 http ids against 2,612 https ones).
+      { source: GOV, source_id: http, content_hash: "h-http" },
+      { source: GOV, source_id: https, content_hash: "h-https" },
+      // A genuinely different document must stay distinct.
+      { source: GOV, source_id: "http://www.gov.cn/zhengce/2016-05/30/content_7082786.htm", content_hash: "h-other" },
+    ]],
+  });
+  // Old state holds both scheme variants of the same document plus a third doc
+  // that appears in NO part — the production gov-rules shape (10,573 state
+  // keys against 6- and 194-record runs): its hash must survive translation.
+  const old = emptyState(GOV);
+  rememberSuccess(old, { sourceId: `${https}/`, hash: "h-old-https" });
+  rememberSuccess(old, { sourceId: http, hash: "h-old-http" });
+  rememberSuccess(old, { sourceId: "https://www.gov.cn/zhengce/2016-05/30/content_7082786.htm", hash: "h-old-other" });
+  const stateOnly = "http://www.gov.cn/zhengce/2019-01/02/content_9999999.htm";
+  rememberSuccess(old, { sourceId: stateOnly, hash: "h-state-only" });
+  await s3.putObject(BUCKET, stateKey(GOV), JSON.stringify(old, null, 1));
+
+  const plan = await rebuildSource({ s3, bucket: BUCKET, source: GOV, stamp: "20261010090000", log: () => {} });
+  const stored = JSON.parse((await s3.getObject(BUCKET, stateKey(GOV))).toString("utf8"));
+  const keys = Object.keys(stored.hashes).sort();
+
+  // Four old keys collapse onto three documents; three part records onto two.
+  assert.equal(plan.oldKeys, 4);
+  assert.equal(plan.mappedFromOldState, 3, "http:// and https:// (and the trailing slash) collapse to ONE key");
+  assert.equal(plan.mappedFromParts, 2);
+  assert.equal(plan.droppedUnmappable, 0);
+  assert.equal(plan.newKeys, 3);
+  assert.deepEqual(keys, [
+    "https://www.gov.cn/zhengce/2016-05/30/content_5721412.htm",
+    "https://www.gov.cn/zhengce/2016-05/30/content_7082786.htm",
+    "https://www.gov.cn/zhengce/2019-01/02/content_9999999.htm",
+  ]);
+  // Part evidence wins over old state; hash values survive translation.
+  assert.equal(stored.hashes["https://www.gov.cn/zhengce/2016-05/30/content_5721412.htm"], "h-https");
+  assert.equal(stored.hashes["https://www.gov.cn/zhengce/2016-05/30/content_7082786.htm"], "h-other");
+  assert.equal(stored.hashes["https://www.gov.cn/zhengce/2019-01/02/content_9999999.htm"], "h-state-only", "a state-only document keeps its hash");
+  // The rebuild imports the ADAPTER's canonicalUrlKey rather than re-deriving
+  // the rule: a second implementation would silently drift from the list side.
+  assert.equal(keyDerivationFor(GOV).fromOldKey("http://x.test/a/"), canonicalUrlKey("http://x.test/a/"));
+  assert.equal(keyDerivationFor(GOV).fromRecord({ source_id: "http://x.test/a/" }), canonicalUrlKey("http://x.test/a/"));
 });
 
 test("the rebuilt state is what the next incremental run skips on", async () => {
   // The point of the whole exercise: a run over an unchanged corpus after the
-  // rebuild must plan nothing.
+  // rebuild must plan nothing. The entries are what the FIXED list side now
+  // emits (case number as source_id), which is the identity the rebuild wrote.
   const s3 = new LocalS3();
   const parts = rmfyalkParts();
   await seedSource(s3, { source: RMFYALK, parts });
   await rebuildSource({ s3, bucket: BUCKET, source: RMFYALK, stamp: "20261010090000", log: () => {} });
 
   const rebuilt = JSON.parse((await s3.getObject(BUCKET, stateKey(RMFYALK))).toString("utf8"));
-  const entries = parts.flat().map((record) => ({ source_id: record.source_id, hash: record.content_hash }));
+  const entries = parts.flat().map((record) => ({
+    source_id: record.metadata.case_no,
+    hash: record.content_hash,
+  }));
   const { targets, skipped } = selectTargets(entries, rebuilt, { mode: "incremental" });
   assert.deepEqual(targets, [], "every corpus entry is already known under the new key");
   assert.equal(skipped.length, 3);
@@ -398,13 +538,21 @@ test("commit verifies what it wrote and cleans up its staging key", async () => 
     rebuiltAt: "2026-10-10T00:00:00.000Z",
     runId: "20261008120000",
     previousKeys: 1,
+    keyScheme: "source_id",
+    runsFolded: 2,
   });
   const result = await commitRebuild({ s3, bucket: BUCKET, source, bytes, stamp: "20261010090000" });
   assert.equal(result.backupKey, `legal-sources/${source}/state.json.bak-20261010090000`);
   assert.equal(await s3.getObject(BUCKET, result.tempKey), null, "the staging key is deleted after commit");
   assert.equal((await s3.getObject(BUCKET, stateKey(source))).toString("utf8"), bytes);
   assert.equal((await s3.getObject(BUCKET, result.backupKey)).toString("utf8"), original);
-  assert.deepEqual(JSON.parse(bytes).rebuild, { at: "2026-10-10T00:00:00.000Z", fromRunId: "20261008120000", previousHashKeys: 1 });
+  assert.deepEqual(JSON.parse(bytes).rebuild, {
+    at: "2026-10-10T00:00:00.000Z",
+    fromRunId: "20261008120000",
+    previousHashKeys: 1,
+    keyScheme: "source_id",
+    runsFolded: 2,
+  });
 });
 
 test("run() rejects an unknown source and enforces an explicit --all", async () => {
@@ -426,16 +574,17 @@ test("run() rejects an unknown source and enforces an explicit --all", async () 
   assert.deepEqual([...s3.snapshot("legal-sources/").keys()], [], "dry-run over --all wrote nothing");
 });
 
-// --all-runs exists for the case that motivated it: the newest run is not
-// always the whole corpus (gov-rules' latest run held 6 records against a
-// ~10.6k state; party's held 194 against 391). Rebuilding from the newest run
-// alone would shrink the state and make the next run re-fetch years of
-// material, so every run's parts can be folded in instead.
-test("rebuild --all-runs folds every run's parts, not just the newest", async () => {
+// Folding all runs is the DEFAULT, for the case that motivated it: the newest
+// run is not always the whole corpus (gov-rules' latest run held 6 records
+// against a ~10.6k state; party's held 194 against 391). Rebuilding from the
+// newest run alone would shrink the state and make the next run re-fetch years
+// of material; the union of runs is a superset, and a surplus state entry
+// costs one lookup, never a re-fetch. --newest-run-only is the escape hatch.
+test("the default folds every run; --newest-run-only restricts to the newest", async () => {
   const s3 = new LocalS3();
   const source = "multi-run-source";
   // The older run holds most of the corpus; the newer one is a scoped run of
-  // a single document — exactly the shape that made the default unsafe.
+  // a single document — exactly the shape that made the old default unsafe.
   await seedSource(s3, {
     source,
     runId: "20261001000000",
@@ -451,15 +600,23 @@ test("rebuild --all-runs folds every run's parts, not just the newest", async ()
     parts: [[{ source_id: "doc-4", content_hash: "h4" }]],
   });
 
-  const newestOnly = await planRebuild({ s3, bucket: BUCKET, source });
-  const allRuns = await planRebuild({ s3, bucket: BUCKET, source, allRuns: true });
+  const byDefault = await planRebuild({ s3, bucket: BUCKET, source });
+  const newestOnly = await planRebuild({ s3, bucket: BUCKET, source, allRuns: false });
 
+  assert.equal(byDefault.ok, true);
   assert.equal(newestOnly.ok, true);
-  assert.equal(allRuns.ok, true);
-  // Default stays conservative (newest run only) ...
-  assert.deepEqual(Object.keys(newestOnly.body.hashes).sort(), ["doc-4"]);
-  // ... while --all-runs carries the whole corpus across the key change.
-  assert.deepEqual(Object.keys(allRuns.body.hashes).sort(),
+  // The default carries the whole corpus across the key change ...
+  assert.deepEqual(Object.keys(byDefault.body.hashes).sort(),
     ["doc-1", "doc-2", "doc-3", "doc-4"]);
-  assert.equal(allRuns.body.hashes["doc-1"], "h1");
+  assert.equal(byDefault.body.hashes["doc-1"], "h1");
+  assert.equal(byDefault.runsFolded, 2);
+  // ... while the escape hatch restricts to the newest run.
+  assert.deepEqual(Object.keys(newestOnly.body.hashes).sort(), ["doc-4"]);
+  assert.equal(newestOnly.runsFolded, 1);
+  // A newer run's hash wins per key under both.
+  assert.equal(byDefault.body.hashes["doc-4"], "h4");
+  // --limit keeps the NEWEST parts, so a truncated fold still resolves
+  // conflicts newest-wins (the oldest corpus is what a sanity run can drop).
+  const limited = await planRebuild({ s3, bucket: BUCKET, source, limit: 1 });
+  assert.deepEqual(Object.keys(limited.body.hashes), ["doc-4"]);
 });

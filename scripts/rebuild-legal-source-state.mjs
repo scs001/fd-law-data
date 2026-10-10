@@ -4,11 +4,23 @@
 //
 // When the key changes, every `hashes` entry in state.json is unreachable: the
 // next run would pay a full crawl to re-learn a corpus it already holds. This
-// script backfills the new keys from the most recent run's structured part
-// files (NDJSON), so the first post-fix run increments instead of re-crawling.
+// script rebuilds the state under the NEW key from two kinds of evidence:
+//
+//   1. the run parts (NDJSON). Parts written before the fix do NOT contain the
+//      new key, so it is DERIVED from each record's own fields per source (see
+//      KEY_DERIVATIONS). A record whose natural key is missing is counted and
+//      skipped — never keyed by whatever unstable id it happens to carry.
+//   2. the old state's own keys, translated with the same per-source rule
+//      where a translation exists. rmfyalk's old keys were rotating tokens
+//      with no path back to a case number: they are unmappable, dropped, and
+//      the count is reported (that is the point — those keys were junk).
+// Parts win on conflict: they are newer evidence than the state they replace.
 //
 // Safety contract:
-//   - idempotent: rebuilding from the same parts twice yields the same state;
+//   - idempotent: rebuilding from the same parts twice yields the same state.
+//     A state this script already rebuilt carries a `rebuild.keyScheme`
+//     marker, so the second pass translates nothing: keys already on the new
+//     identity map to themselves instead of being dropped as old-key junk;
 //   - never leaves a half-new state: the new object is built in memory, staged
 //     at a temp key, read back byte-for-byte, and only then written over
 //     state.json; any failure leaves the original object untouched and exits
@@ -29,6 +41,7 @@ import { loadConfig } from "../lib/config.js";
 import { createS3 } from "../lib/s3.js";
 import { emptyState, loadState, stateKeyOf } from "../lib/legal-sources/state.js";
 import { SOURCE_ADAPTERS } from "../lib/legal-sources/sources/index.js";
+import { canonicalUrlKey } from "../lib/legal-sources/sources/gov-rules.js";
 import {
   stateBackupKey,
   stateKey,
@@ -37,7 +50,7 @@ import {
 } from "../lib/legal-sources/storage.js";
 
 export function parseArgs(argv) {
-  const opts = { source: null, all: false, dryRun: false, limit: 0, help: false };
+  const opts = { source: null, all: false, allRuns: true, dryRun: false, limit: 0, help: false };
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
     const next = argv[i + 1];
@@ -45,6 +58,7 @@ export function parseArgs(argv) {
     if (token === "--source" && value) { opts.source = value; i++; }
     else if (token === "--all") opts.all = true;
     else if (token === "--all-runs") opts.allRuns = true;
+    else if (token === "--newest-run-only") opts.allRuns = false;
     else if (token === "--dry-run") opts.dryRun = true;
     else if (token === "--limit") { opts.limit = Number(value ?? 0); if (value) i++; }
     else if (token === "--help" || token === "-h") opts.help = true;
@@ -56,14 +70,83 @@ export function parseArgs(argv) {
 const USAGE = `usage: node scripts/rebuild-legal-source-state.mjs --source <id> [--dry-run] [--limit N]
        node scripts/rebuild-legal-source-state.mjs --all [--dry-run] [--limit N]
 
-  --source <id>  one source id to rebuild (required unless --all)
-  --all          iterate every registered source (use --dry-run first)
-  --all-runs      rebuild from EVERY run's parts, not just the newest (use when
-                  the newest run is partial; check the dry-run record count)
-  --dry-run      print what would change; write nothing
-  --limit N      stop after N part files (cheap sanity runs)
+  --source <id>      one source id to rebuild (required unless --all)
+  --all              iterate every registered source (use --dry-run first)
+  --all-runs         (DEFAULT) fold EVERY run's parts. The union of all runs is
+                     a superset of the corpus: a document dropped upstream
+                     simply will not be listed next run, while its state entry
+                     costs one lookup and can never cause a re-fetch. The
+                     newest run alone is NOT the corpus (production gov-rules:
+                     6 records against 10,573 state keys), so folding only the
+                     newest shrinks the rebuilt state and makes the next run
+                     re-fetch years of material.
+  --newest-run-only  fold only the newest run's parts (the old default; safe
+                     only when that run is known to be the complete corpus)
+  --dry-run          print what would change; write nothing
+  --limit N          keep only the newest N part files (cheap sanity runs; a
+                     truncated fold still resolves conflicts newest-wins)
 
 known sources: ${[...SOURCE_ADAPTERS.keys()].join(", ")}`;
+
+const text = (value) => {
+  const out = value == null ? "" : String(value).trim();
+  return out || null;
+};
+
+// party-regulation rows are versioned (`URL@v-<hash>`, one row per revision)
+// while the entity is the URL; the version suffix is not part of the identity
+// the incremental state is keyed by (party-regulation.js parsePartyDetail).
+const VERSION_SUFFIX_RE = /@v-[0-9a-f]+$/i;
+const stripVersionSuffix = (value) => text(value)?.replace(VERSION_SUFFIX_RE, "") || null;
+
+// Per-source derivation of the NEW state key. One entry per registered source,
+// so a future key change is one table edit — and a registered source with no
+// entry is an ERROR (keyDerivationFor) rather than a silent rebuild on
+// whatever `source_id` the parts happen to hold.
+//
+//   fromRecord(record) -> new key | null   (part records, old and new)
+//   fromOldKey(key)    -> new key | null   (keys of the state being replaced)
+const KEY_DERIVATIONS = new Map([
+  ["rmfyalk-case-library", {
+    scheme: "case_no",
+    // The old source_id was a per-request rotating token; the case number is
+    // the identity and lives in metadata (present on old records too).
+    fromRecord: (record) => text(record?.metadata?.case_no),
+    // A token carries no case number: there is no translation back, so every
+    // old key is unmappable and is dropped (counted in the summary).
+    fromOldKey: () => null,
+  }],
+  ["party-regulation-library", {
+    scheme: "canonical_article_url",
+    fromRecord: (record) => text(record?.metadata?.canonical_source_id) ?? stripVersionSuffix(record?.source_id),
+    fromOldKey: stripVersionSuffix,
+  }],
+  ["gov-rules-library", {
+    scheme: "canonical_url",
+    // One implementation with the adapter: canonicalUrlKey normalises scheme
+    // and trailing slash, so an http/https flip collapses onto one key.
+    fromRecord: (record) => canonicalUrlKey(record?.source_id),
+    fromOldKey: canonicalUrlKey,
+  }],
+  // Sources whose identity did not change: state key = source_id (or the
+  // adapter-declared state_key), exactly as the runtime keys it.
+  ["mfa-treaty-library", { scheme: "source_id", fromRecord: stateKeyOf, fromOldKey: text }],
+  ["ccdi-supervisory-regulations", { scheme: "source_id", fromRecord: stateKeyOf, fromOldKey: text }],
+]);
+
+const IDENTITY_DERIVATION = { scheme: "source_id", fromRecord: stateKeyOf, fromOldKey: text };
+
+export function keyDerivationFor(source) {
+  const derivation = KEY_DERIVATIONS.get(source);
+  if (derivation) return derivation;
+  // Unregistered ids (tests) have no key change to translate and fall back to
+  // identity. A REGISTERED source missing an entry must fail loudly instead of
+  // silently rebuilding on source_id.
+  if (SOURCE_ADAPTERS.has(source)) {
+    throw new Error(`no state-key derivation registered for source ${source}; add one to KEY_DERIVATIONS`);
+  }
+  return IDENTITY_DERIVATION;
+}
 
 // A structured part is `run-<14-digit-id>-partNNN.jsonl`. The run id is part of
 // the key so a rebuild can fold runs in chronological order exactly like the
@@ -86,10 +169,10 @@ export function classifyPartKeys(keys) {
   return ordered;
 }
 
-export function parsePartLines(text) {
+export function parsePartLines(body) {
   const records = [];
   let malformed = 0;
-  for (const line of String(text ?? "").split("\n")) {
+  for (const line of String(body ?? "").split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
@@ -115,31 +198,40 @@ async function listAllParts(s3, bucket, source) {
   return keys;
 }
 
-// Rebuild one source's state from the newest run's parts. Returns a plan; the
-// caller decides whether to commit it.
-export async function planRebuild({ s3, bucket, source, limit = 0, allRuns = false }) {
-  const optsAllRuns = allRuns;
+// Rebuild one source's state from its run parts plus its old state's keys.
+// Returns a plan; the caller decides whether to commit it.
+export async function planRebuild({ s3, bucket, source, limit = 0, allRuns = true }) {
+  const derivation = keyDerivationFor(source);
   const current = await loadState(s3, bucket, source);
-  const oldKeys = Object.keys(current.hashes ?? {}).length;
+  const oldHashes = current.hashes ?? {};
+  const oldKeys = Object.keys(oldHashes).length;
   const oldFailures = Object.keys(current.failures ?? {}).length;
+
+  // A state this script already rebuilt is on the new key. Translating its
+  // keys with a lossy rule again (rmfyalk: old key -> nothing) would report
+  // every key as dropped although it is already correct; the marker is the
+  // proof that the state is post-migration. A state without the marker
+  // predates the migration and its keys need the real translation.
+  const alreadyMigrated = current.rebuild?.keyScheme === derivation.scheme;
+  const translateOldKey = alreadyMigrated ? text : derivation.fromOldKey;
 
   const runs = classifyPartKeys(await listAllParts(s3, bucket, source));
   if (!runs.length) {
     return { source, ok: false, reason: `no structured run parts under ${structuredPrefix(source)}`, oldKeys, oldFailures };
   }
-  // Default: the newest run only. It is "the corpus today"; folding older runs
-  // back together would resurrect documents the source has since dropped.
-  //
-  // --all-runs exists because the newest run is not always the whole corpus:
-  // gov-rules' most recent run held only 6 records against a ~10.6k state, and
-  // party's held 194 against 391 — a scoped or partial run would otherwise
-  // shrink the rebuilt state and make the next run re-fetch years of material.
-  // Use it when the newest run is known to be partial (check the run manifest
-  // with --dry-run first; the record count is printed).
-  const useAll = optsAllRuns === true;
+  // Default: EVERY run. The union is a superset of the corpus, so it can only
+  // add state entries — and an extra entry costs one lookup, never a re-fetch;
+  // a document genuinely dropped upstream is simply not listed next run. The
+  // newest run alone is not the corpus: production gov-rules' newest run held
+  // 6 records against 10,573 state keys and party's held 194 against 391, so
+  // folding only the newest shrinks the state and forces a full re-crawl.
+  // --newest-run-only exists for the rare run known to be the whole corpus.
   const run = runs.at(-1);
-  const partKeys = (useAll ? runs.flatMap((r) => r.keys) : run.keys)
-    .slice(0, limit > 0 ? limit : undefined);
+  const ordered = allRuns ? runs.flatMap((r) => r.keys) : run.keys;
+  // --limit keeps the NEWEST parts: hash conflicts resolve newest-wins, so
+  // truncating from the oldest end leaves the fold semantics of what is read
+  // intact (a sanity run sees the records that would win).
+  const partKeys = limit > 0 ? ordered.slice(-limit) : ordered;
 
   const next = emptyState(source);
   let records = 0;
@@ -151,6 +243,20 @@ export async function planRebuild({ s3, bucket, source, limit = 0, allRuns = fal
   // survives the key change and must be carried over rather than recomputed.
   let watermark = current.watermark ?? null;
 
+  // Old state first (older evidence): a key a part also carries is overwritten
+  // by the newer hash in the parts loop below. Counters count DISTINCT new
+  // keys, so two old keys that collapse onto one (gov-rules http + https for
+  // the same document) report as one mapped key, not two.
+  const fromOldState = new Set();
+  let droppedUnmappable = 0;
+  for (const [oldKey, hash] of Object.entries(oldHashes)) {
+    const newKey = translateOldKey(oldKey);
+    if (!newKey) { droppedUnmappable++; continue; }
+    fromOldState.add(newKey);
+    next.hashes[newKey] = hash;
+  }
+
+  const fromParts = new Set();
   for (const key of partKeys) {
     const buf = await s3.getObject(bucket, key);
     if (!buf) continue;
@@ -159,43 +265,55 @@ export async function planRebuild({ s3, bucket, source, limit = 0, allRuns = fal
     malformed += parsed.malformed;
     for (const record of parsed.records) {
       records++;
-      const stateKeyId = stateKeyOf(record);
-      if (!stateKeyId) { skippedNoKey++; continue; }
+      const newKey = derivation.fromRecord(record);
+      if (!newKey) { skippedNoKey++; continue; }
       if (!record.content_hash) { skippedNoHash++; continue; }
-      next.hashes[stateKeyId] = record.content_hash;
+      next.hashes[newKey] = record.content_hash;
+      fromParts.add(newKey);
       const published = record.published_at ?? null;
       if (published && (!watermark || String(published) > String(watermark))) watermark = published;
     }
   }
   next.watermark = watermark;
 
-  // A failure is retry evidence for a key the next run will look up. Old keys
-  // are by definition unreachable after a key change, so most failures drop —
-  // but a failure whose key already equals a new key (an already-migrated
-  // state, i.e. a second run) must survive verbatim.
-  const mappedFailures = Object.keys(current.failures ?? {}).filter((key) => key in next.hashes);
-  for (const key of mappedFailures) next.failures[key] = current.failures[key];
-  const droppedFailures = oldFailures - mappedFailures.length;
+  // Failures are retry evidence for a key the next run will look up, so they
+  // are translated with the same rule as hashes: a failure on an unmappable
+  // old key can never be reached again and is dropped, a translated one keeps
+  // its attempts under the new key. Unlike hashes they are NOT shadowed by a
+  // part success: a part proves an earlier fetch worked, while the failure is
+  // the latest attempt's evidence.
+  let keptFailures = 0;
+  for (const [oldKey, failure] of Object.entries(current.failures ?? {})) {
+    const newKey = translateOldKey(oldKey);
+    if (!newKey) continue;
+    next.failures[newKey] = { ...failure, sourceId: newKey };
+    keptFailures++;
+  }
+  const droppedFailures = oldFailures - keptFailures;
 
   const rebuilt = Object.keys(next.hashes).length;
   if (!rebuilt) {
-    return { source, ok: false, reason: `run ${run.runId} yielded no usable hash keys`, oldKeys, oldFailures, partsRead, records };
+    return {
+      source, ok: false, reason: "no hash key could be derived from the parts or the old state",
+      oldKeys, oldFailures, partsRead, records,
+    };
   }
-  const carriedKeys = Object.keys(current.hashes ?? {}).filter((key) => key in next.hashes).length;
 
   return {
     source,
     ok: true,
+    keyScheme: derivation.scheme,
+    alreadyMigrated,
     runId: run.runId,
     runsAvailable: runs.length,
+    runsFolded: allRuns ? runs.length : 1,
     oldKeys,
+    mappedFromOldState: fromOldState.size,
+    mappedFromParts: fromParts.size,
+    droppedUnmappable,
     newKeys: rebuilt,
-    // Old keys that no longer exist under the new identity. A non-zero count is
-    // the expected outcome of a key change; a zero count means the rebuild was
-    // a no-op (already migrated).
-    droppedKeys: oldKeys - carriedKeys,
     oldFailures,
-    keptFailures: mappedFailures.length,
+    keptFailures,
     droppedFailures,
     partsRead,
     malformed,
@@ -208,12 +326,14 @@ export async function planRebuild({ s3, bucket, source, limit = 0, allRuns = fal
 
 // Build the bytes the object will hold. Same shape as saveState produces, with
 // an explicit rebuild marker so a rebuilt state is auditable from the object
-// alone (there is no rename, so the marker is the provenance record).
-export function serializeState(state, { rebuiltAt, runId, previousKeys }) {
+// alone (there is no rename, so the marker is the provenance record). The
+// keyScheme is what makes a second rebuild idempotent: it tells the next pass
+// that the state is already on the new identity.
+export function serializeState(state, { rebuiltAt, runId, previousKeys, keyScheme, runsFolded }) {
   const body = {
     ...state,
     updatedAt: rebuiltAt,
-    rebuild: { at: rebuiltAt, fromRunId: runId, previousHashKeys: previousKeys },
+    rebuild: { at: rebuiltAt, fromRunId: runId, previousHashKeys: previousKeys, keyScheme, runsFolded },
   };
   return JSON.stringify(body, null, 1);
 }
@@ -254,35 +374,47 @@ export async function commitRebuild({ s3, bucket, source, bytes, stamp }) {
 }
 
 function summaryLines(plan, { dryRun, backupKey, stamp }) {
+  const row = (label, value) => `${label.padEnd(22)}: ${value}`;
   const lines = [
-    `source            : ${plan.source}`,
-    `mode              : ${dryRun ? "dry-run (nothing written)" : "written"}`,
+    row("source", plan.source),
+    row("mode", dryRun ? "dry-run (nothing written)" : "written"),
   ];
   if (!plan.ok) {
-    lines.push(`result            : SKIPPED — ${plan.reason}`);
+    lines.push(row("result", `SKIPPED — ${plan.reason}`));
     return lines;
   }
   lines.push(
-    `from run          : ${plan.runId} (${plan.partsRead} part(s) of ${plan.runsAvailable} run(s) available; ${plan.records} record(s))`,
-    `old hash keys     : ${plan.oldKeys}`,
-    `new hash keys     : ${plan.newKeys}`,
-    `dropped keys      : ${plan.droppedKeys}`,
-    `failures          : ${plan.keptFailures} kept / ${plan.droppedFailures} dropped (of ${plan.oldFailures})`,
+    row("runs folded", `${plan.runsFolded} of ${plan.runsAvailable} available (${plan.partsRead} part(s), ${plan.records} record(s))`),
+    row("old state keys", plan.oldKeys),
+    row("mapped from old state", plan.mappedFromOldState),
+    row("mapped from parts", plan.mappedFromParts),
+    row("dropped unmappable", plan.droppedUnmappable),
+    row("new state keys", plan.newKeys),
+    row("failures", `${plan.keptFailures} kept / ${plan.droppedFailures} dropped (of ${plan.oldFailures})`),
   );
-  if (plan.skippedNoKey) lines.push(`records w/o key   : ${plan.skippedNoKey} (skipped)`);
-  if (plan.skippedNoHash) lines.push(`records w/o hash  : ${plan.skippedNoHash} (skipped)`);
-  if (plan.malformed) lines.push(`malformed lines   : ${plan.malformed} (skipped)`);
+  if (plan.droppedUnmappable) {
+    // Loud on purpose: a dropped old key is either junk (rmfyalk's rotating
+    // tokens) or a translation the table is missing. Either way the operator
+    // must see it, not discover it in the next full crawl.
+    lines.push(row("unmappable note", `${plan.droppedUnmappable} old key(s) have no translation under the new identity and were dropped`));
+  }
+  if (plan.skippedNoKey) lines.push(row("records w/o key", `${plan.skippedNoKey} (skipped)`));
+  if (plan.skippedNoHash) lines.push(row("records w/o hash", `${plan.skippedNoHash} (skipped)`));
+  if (plan.malformed) lines.push(row("malformed lines", `${plan.malformed} (skipped)`));
   lines.push(
-    dryRun
-      ? `backup would be   : ${stateBackupKey(plan.source, stamp)} (cleanup is manual)`
-      : backupKey
-        ? `backup            : ${backupKey} (cleanup is manual)`
-        : "backup            : none (no previous state)",
+    row(
+      dryRun ? "backup would be" : "backup",
+      dryRun
+        ? `${stateBackupKey(plan.source, stamp)} (cleanup is manual)`
+        : backupKey
+          ? `${backupKey} (cleanup is manual)`
+          : "none (no previous state)",
+    ),
   );
   return lines;
 }
 
-export async function rebuildSource({ s3, bucket, source, dryRun = false, limit = 0, allRuns = false, stamp, now = null, log = console.log }) {
+export async function rebuildSource({ s3, bucket, source, dryRun = false, limit = 0, allRuns = true, stamp, now = null, log = console.log }) {
   const plan = await planRebuild({ s3, bucket, source, limit, allRuns });
   let backupKey = null;
   if (plan.ok && !dryRun) {
@@ -290,6 +422,8 @@ export async function rebuildSource({ s3, bucket, source, dryRun = false, limit 
       rebuiltAt: (now ?? new Date()).toISOString(),
       runId: plan.runId,
       previousKeys: plan.oldKeys,
+      keyScheme: plan.keyScheme,
+      runsFolded: plan.runsFolded,
     });
     const committed = await commitRebuild({ s3, bucket, source, bytes, stamp });
     backupKey = committed.backupKey;
@@ -329,7 +463,7 @@ export async function run({ argv = [], s3 = null, bucket = null, stamp = null, l
   const skipped = [];
   for (const source of sources) {
     try {
-      results.push(await rebuildSource({ s3: client, bucket: target, source, dryRun: opts.dryRun, limit: opts.limit, allRuns: opts.allRuns === true, stamp: stampValue, log }));
+      results.push(await rebuildSource({ s3: client, bucket: target, source, dryRun: opts.dryRun, limit: opts.limit, allRuns: opts.allRuns, stamp: stampValue, log }));
     } catch (err) {
       skipped.push({ source, reason: String(err?.message ?? err) });
     }
