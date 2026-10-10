@@ -27,6 +27,7 @@ import {
   commitRebuild,
   parseArgs,
   parsePartLines,
+  planRebuild,
   rebuildSource,
   run,
   serializeState,
@@ -423,4 +424,42 @@ test("run() rejects an unknown source and enforces an explicit --all", async () 
   const dry = await run({ argv: ["--all", "--dry-run"], s3, bucket: BUCKET, log: () => {} });
   assert.equal(dry.ok, false, "dry-run reports skips too");
   assert.deepEqual([...s3.snapshot("legal-sources/").keys()], [], "dry-run over --all wrote nothing");
+});
+
+// --all-runs exists for the case that motivated it: the newest run is not
+// always the whole corpus (gov-rules' latest run held 6 records against a
+// ~10.6k state; party's held 194 against 391). Rebuilding from the newest run
+// alone would shrink the state and make the next run re-fetch years of
+// material, so every run's parts can be folded in instead.
+test("rebuild --all-runs folds every run's parts, not just the newest", async () => {
+  const s3 = new LocalS3();
+  const source = "multi-run-source";
+  // The older run holds most of the corpus; the newer one is a scoped run of
+  // a single document — exactly the shape that made the default unsafe.
+  await seedSource(s3, {
+    source,
+    runId: "20261001000000",
+    parts: [[
+      { source_id: "doc-1", content_hash: "h1" },
+      { source_id: "doc-2", content_hash: "h2" },
+      { source_id: "doc-3", content_hash: "h3" },
+    ]],
+  });
+  await seedSource(s3, {
+    source,
+    runId: "20261002000000",
+    parts: [[{ source_id: "doc-4", content_hash: "h4" }]],
+  });
+
+  const newestOnly = await planRebuild({ s3, bucket: BUCKET, source });
+  const allRuns = await planRebuild({ s3, bucket: BUCKET, source, allRuns: true });
+
+  assert.equal(newestOnly.ok, true);
+  assert.equal(allRuns.ok, true);
+  // Default stays conservative (newest run only) ...
+  assert.deepEqual(Object.keys(newestOnly.body.hashes).sort(), ["doc-4"]);
+  // ... while --all-runs carries the whole corpus across the key change.
+  assert.deepEqual(Object.keys(allRuns.body.hashes).sort(),
+    ["doc-1", "doc-2", "doc-3", "doc-4"]);
+  assert.equal(allRuns.body.hashes["doc-1"], "h1");
 });

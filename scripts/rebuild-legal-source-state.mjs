@@ -44,6 +44,7 @@ export function parseArgs(argv) {
     const value = next && !String(next).startsWith("--") ? next : null;
     if (token === "--source" && value) { opts.source = value; i++; }
     else if (token === "--all") opts.all = true;
+    else if (token === "--all-runs") opts.allRuns = true;
     else if (token === "--dry-run") opts.dryRun = true;
     else if (token === "--limit") { opts.limit = Number(value ?? 0); if (value) i++; }
     else if (token === "--help" || token === "-h") opts.help = true;
@@ -57,6 +58,8 @@ const USAGE = `usage: node scripts/rebuild-legal-source-state.mjs --source <id> 
 
   --source <id>  one source id to rebuild (required unless --all)
   --all          iterate every registered source (use --dry-run first)
+  --all-runs      rebuild from EVERY run's parts, not just the newest (use when
+                  the newest run is partial; check the dry-run record count)
   --dry-run      print what would change; write nothing
   --limit N      stop after N part files (cheap sanity runs)
 
@@ -114,7 +117,8 @@ async function listAllParts(s3, bucket, source) {
 
 // Rebuild one source's state from the newest run's parts. Returns a plan; the
 // caller decides whether to commit it.
-export async function planRebuild({ s3, bucket, source, limit = 0 }) {
+export async function planRebuild({ s3, bucket, source, limit = 0, allRuns = false }) {
+  const optsAllRuns = allRuns;
   const current = await loadState(s3, bucket, source);
   const oldKeys = Object.keys(current.hashes ?? {}).length;
   const oldFailures = Object.keys(current.failures ?? {}).length;
@@ -123,11 +127,19 @@ export async function planRebuild({ s3, bucket, source, limit = 0 }) {
   if (!runs.length) {
     return { source, ok: false, reason: `no structured run parts under ${structuredPrefix(source)}`, oldKeys, oldFailures };
   }
-  // The newest run is the corpus as it stands today. Older runs are ignored:
-  // folding every run back together would resurrect documents the source
-  // dropped, and the goal is only to carry today's corpus across the key change.
+  // Default: the newest run only. It is "the corpus today"; folding older runs
+  // back together would resurrect documents the source has since dropped.
+  //
+  // --all-runs exists because the newest run is not always the whole corpus:
+  // gov-rules' most recent run held only 6 records against a ~10.6k state, and
+  // party's held 194 against 391 — a scoped or partial run would otherwise
+  // shrink the rebuilt state and make the next run re-fetch years of material.
+  // Use it when the newest run is known to be partial (check the run manifest
+  // with --dry-run first; the record count is printed).
+  const useAll = optsAllRuns === true;
   const run = runs.at(-1);
-  const partKeys = limit > 0 ? run.keys.slice(0, limit) : run.keys;
+  const partKeys = (useAll ? runs.flatMap((r) => r.keys) : run.keys)
+    .slice(0, limit > 0 ? limit : undefined);
 
   const next = emptyState(source);
   let records = 0;
@@ -270,8 +282,8 @@ function summaryLines(plan, { dryRun, backupKey, stamp }) {
   return lines;
 }
 
-export async function rebuildSource({ s3, bucket, source, dryRun = false, limit = 0, stamp, now = null, log = console.log }) {
-  const plan = await planRebuild({ s3, bucket, source, limit });
+export async function rebuildSource({ s3, bucket, source, dryRun = false, limit = 0, allRuns = false, stamp, now = null, log = console.log }) {
+  const plan = await planRebuild({ s3, bucket, source, limit, allRuns });
   let backupKey = null;
   if (plan.ok && !dryRun) {
     const bytes = serializeState(plan.body, {
@@ -317,7 +329,7 @@ export async function run({ argv = [], s3 = null, bucket = null, stamp = null, l
   const skipped = [];
   for (const source of sources) {
     try {
-      results.push(await rebuildSource({ s3: client, bucket: target, source, dryRun: opts.dryRun, limit: opts.limit, stamp: stampValue, log }));
+      results.push(await rebuildSource({ s3: client, bucket: target, source, dryRun: opts.dryRun, limit: opts.limit, allRuns: opts.allRuns === true, stamp: stampValue, log }));
     } catch (err) {
       skipped.push({ source, reason: String(err?.message ?? err) });
     }
