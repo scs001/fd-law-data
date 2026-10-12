@@ -9,6 +9,7 @@ import {
   persistReport,
   reportKey,
   shanghaiDateStr,
+  shouldFail,
   sourceDbStats,
   staleness,
 } from "../lib/legal-sources/report.js";
@@ -206,4 +207,34 @@ test("report joins manifest audit, state liveness and DB stats; zero-new stays g
   const persisted = JSON.parse(s3.puts[0].body);
   assert.equal(persisted.date, "2026-10-06");
   assert.equal(persisted.sources["gov-rules-library"].stale, false);
+});
+
+test("report exit code: only 断流 fails the job, source-level incomplete stays visible but green", async () => {
+  const sources = ["gov-rules-library", "mfa-treaty-library"];
+  const objects = {
+    [manifestKey("gov-rules-library", "2026-10-05", "r1")]: {
+      version: 1, runId: "r1", runDate: "2026-10-05", finishedAt: hoursAgo(2),
+      coverage: { complete: true, emitted: 3, failures: 0 }, aborted: null,
+    },
+  };
+  const s3 = fakeS3(objects);
+  // mfa has fresh loaded rows but no complete manifest — the accepted
+  // out-of-scope attachment gap. Fresh, so not stale.
+  const pg = fakePg({
+    stats: {
+      "gov-rules-library": { total_rows: 100, last_fetched_at: hoursAgo(2), new_today: 0, new_7d: 3, effective_body_rows: 99 },
+      "mfa-treaty-library": { total_rows: 50, last_fetched_at: hoursAgo(3), new_today: 0, new_7d: 1, effective_body_rows: 50 },
+    },
+  });
+  const report = await buildLegalSourcesReport({
+    s3, bucket: "laws", sources, pgClient: pg, now: NOW,
+  });
+
+  // Nothing is 断流: mfa is fresh despite carrying no complete manifest.
+  assert.deepEqual(report.stale_sources, []);
+  // The coverage gap is still reported, just not as an outage.
+  assert.deepEqual(report.incomplete, ["mfa-treaty-library"]);
+
+  assert.equal(shouldFail(report), false);
+  assert.equal(shouldFail({ ...report, stale_sources: ["gov-rules-library"] }), true);
 });

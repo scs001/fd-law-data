@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { loadConfig } from "../lib/config.js";
 import { createS3 } from "../lib/s3.js";
-import { buildLegalSourcesReport, persistReport } from "../lib/legal-sources/report.js";
+import { buildLegalSourcesReport, persistReport, shouldFail } from "../lib/legal-sources/report.js";
 import { SOURCE_ADAPTERS } from "../lib/legal-sources/sources/index.js";
 
 export async function main() {
@@ -31,7 +31,7 @@ export async function main() {
     console.log(JSON.stringify(report, null, 1));
     // Same-day reruns overwrite the same dated file (idempotent series key).
     await persistReport(s3, cfg.lawsBucket, report);
-    if (report.incomplete.length) process.exitCode = 2;
+    if (shouldFail(report)) process.exitCode = 2;
     return report;
   } finally {
     await client.end();
