@@ -142,13 +142,80 @@ must pass login-proxy probe, crawl-proxy probe and a small-batch run before it
 is allowed. Logs emit identity/proxy/status only; tokens, cookies, names and
 national identifiers are redacted.
 
-### Deployment debt before enabling CronJobs
+### Lighting-up gate (点亮门) before enabling CronJobs
 
-1. Push a Jenkins image containing this code (the manifests currently reference
-   the placeholder tag `v0.2.0-legal-sources`) and pin that immutable sha tag.
-2. Apply `k8s/legal-source-crawl-cronjobs.yaml` or the `helm-law-scraw`
-   `legalSources` block; `helm template` renders six CronJobs.
-3. Leave every new CronJob suspended until its real dry-run/load check passes.
+A source may be unsuspended only after **all** of the following hold. The gate
+exists so a known-broken source never reaches a production schedule.
+
+1. **Fix merged**: the source's known collection defects are fixed and on main.
+2. **Image pinned**: the CronJob references an immutable `sha-<short>` tag from
+   the TCR channel (see below), not a rolling or semantic tag.
+3. **Dry-run passed**: one manual run produces a snapshot, and sampled QA is
+   within the source's acceptance line (for ccdi: capture rate ≥95% of
+   source-side entries that have a body page; for party: entry count matches the
+   enumerated category baseline).
+4. **Blocker list clear**: no open blocker for that source.
+
+Roll out **one wave at a time** (`helm-law-scraw` `values.yaml` →
+`legalSources.sources.<id>.suspend` / `loaders.<id>.suspend`), keeping each
+source's crawl+load pair in the same wave. After flipping, run a **3-day
+observation window** per source: freshness stays inside the 48h green line and
+the daily report shows no `stale` verdict. Wave-flip manual:
+`helm-law-scraw/APPLY-NOTES.md`.
+
+### Image channel: GitHub Actions → hkccr → tcr-relay → ccr
+
+Never use Jenkins→Harbor for new pins (that channel is retired; Harbor was
+uninstalled 2026-10-11). Tags are `sha-<7-char>` plus a rolling `main`.
+
+```
+push → Actions image.yml → hkccr.ccs.tencentyun.com/lawcraw-business/fd-law-data
+     → cheap-3 tcr-relay (cron */5) → ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data
+```
+
+Before a dry-run or a roll, warm the node and confirm the digest:
+`crictl pull ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-<x>`. The
+relay can lag GitHub Actions by several minutes — pulling first avoids
+`ImagePullBackOff`.
+
+**If Actions is blocked by account billing** (a run fails within seconds with
+"recent account payments have failed"), fall back to a **delta build on
+xinru-server2** — same region as ccr, so no cross-Pacific push:
+
+```bash
+mkdir -p /root/delta-law/{bin,lib/legal-sources}     # target dirs must exist first
+cd /root/delta-law
+cat > Dockerfile <<'EOF'
+FROM ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-<base>
+COPY bin/<changed>.mjs /app/bin/<changed>.mjs
+EOF
+docker build -t ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-<new> \
+  -f /root/delta-law/Dockerfile /root/delta-law
+docker push ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-<new>
+```
+
+Then roll with `kubectl set image cronjob/<name> -n scraw "*=...:sha-<new>"`
+(nodes already carry ccr credentials; a bare `ctr images pull` returns 401).
+
+### Daily report inspection (日期序列巡检法)
+
+`legal-sources-report` writes one dated file per day to
+`laws/legal-sources/report/report-YYYYMMDD.json` (Asia/Shanghai date; same-day
+reruns overwrite). **A gap in that series is how a report outage is found** —
+there is no push alert.
+
+Per source the report carries `freshness_at` / `freshness_hours`, `new_today`,
+`new_7d`, `coverage_count` and `effective_body_ratio` (effective body = content
+with whitespace stripped ≥50 chars), plus two lists that mean different things:
+
+- `stale_sources` — **断流**: no success evidence within 48h. Only this makes the
+  report job exit non-zero.
+- `incomplete` — **coverage gap**: the latest manifest is not `complete`. This is
+  *not* an outage — zero-new runs never write a new manifest, so a source with an
+  accepted out-of-scope gap (e.g. mfa-treaty attachment PDFs exceeding the size
+  limit) can carry this flag indefinitely while staying fresh.
+
+Zero new rows is healthy, never stale — do not read `new_today=0` as a failure.
 
 ## Daily operation
 
