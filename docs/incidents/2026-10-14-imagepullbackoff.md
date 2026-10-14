@@ -82,6 +82,17 @@ tag**；另有一批对象仍钉 2026-10-11 退役的 Harbor，全凭节点缓�
 修后实证（全链打通）：派发单 #182 → Job `gov-rules-crawl-182` 以锚点 tag
 `sha-b63d0d1` 拉起 → `crawl_runs #2064` 真开跑（非拉起即挂）。
 
+## 附带发现：vm-0-15 磁盘高位（同日晚）
+
+修复验证期间该节点 `DiskPressure` 一度转真，kubelet 驱逐了 54 个
+`legal-auth-broker` pod（Deployment 随后自愈；无其它 workload 受损）。
+
+构成：`/var/lib/fd-open-data/pgdata` **21G（活的中央 PG，绝不可动）** +
+k3s 7.4G + docker 4.2G，盘仅 39G。已清掉 3 个无容器使用的旧 fd-law-data tag
+（~860MB），仍在 91%。**复发风险**：再触发驱逐会再次打掉 broker（法律线
+rmfyalk 会话租借依赖它）。建议迁 PG 数据目录到更大盘（xinru-server2 盘 24%）
+或扩盘——登记为遗留改进项。
+
 ## 防复发三件套
 
 1. **锚点自愈**：`/etc/tcr-relay/anchors.conf` 现含全部法律线生产 tag +
