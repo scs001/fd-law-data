@@ -67,6 +67,21 @@ tag**；另有一批对象仍钉 2026-10-11 退役的 Harbor，全凭节点缓�
 | 11 | 7 行 `crawl_sources.runner_image` 滚到锚点 tag（改前值留档）；新增 alembic `0011_federated_runner_tag` 作可重放副本 | DB 复核 7/7 已是锚点 tag；全量测试 1158 passed / 15 failed（15 均为既有失败，已与基线逐文件核对） |
 | 12 | 面板 env / DB 声明纳入「可拉性」规则（不只是 workload spec） | `fd-image-pin-audit.sh` + 事故报告 + skill 坑册均已注明 |
 
+## 事故余波：孤儿 run 阻塞派发（同日修复）
+
+`crawl_runs #2033`（gov-rules-crawl）是**孤儿行**：它跟踪的 Job
+`gov-rules-crawl-29865330` 早已 `Failed(DeadlineExceeded)`，但 dispatcher 的
+轮询进程在事故中死亡，行永远停在 `running`。DB 层 single-flight 守卫
+（`SELECT id FROM crawl_runs WHERE source=%s AND status='running'`）因此
+**永久阻塞该源的一切派发**——验证单直接报 `skipped: run #2033 still open`。
+
+处理：把该行闭为 `failed`（error_head 写明来源；改前值留档
+`/tmp/run2033_preimage.txt`）。**注意：这类孤儿行没有 reaper**，只能人工或
+巡检发现；建议后续给派发加"超时回收"（本报告登记为遗留改进项）。
+
+修后实证（全链打通）：派发单 #182 → Job `gov-rules-crawl-182` 以锚点 tag
+`sha-b63d0d1` 拉起 → `crawl_runs #2064` 真开跑（非拉起即挂）。
+
 ## 防复发三件套
 
 1. **锚点自愈**：`/etc/tcr-relay/anchors.conf` 现含全部法律线生产 tag +
