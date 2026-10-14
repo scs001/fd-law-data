@@ -37,6 +37,14 @@ tag**；另有一批对象仍钉 2026-10-11 退役的 Harbor，全凭节点缓�
    "auth pool dry"。另有 vm-0-15 上一枚 **主机级** `/etc/cron.d/fd-dispatcher`
    与集群内 dispatcher 抢单，但它没有 k8s SA token，凡它领到的单必报
    `dispatcher k8s error: ... serviceaccount/token`。
+5. **第四层——数据库里的 `runner_image`（续查追加）**：dispatcher 派发 Job 时
+   用的是 `crawl_sources.runner_image`，而它**不受** `dispatch.sync_sources`
+   管辖（该同步只负责 site/schedule/enabled/auth_profile/last_commit，且整条
+   跳过 federated 行）——0007 播下后只能靠人手滚动。续查发现 7 行已漂到拉不
+   到的 tag：`sha-3ca3e8b`（6 个法律源，仅存 hkccr 而节点只拉 ccr）、
+   `sha-9eb5c72`（rmfyalk，两库皆无，派发即起不来）；0007 自带种子常量同病
+   （`_IMG_BROKER=sha-4b79ec5` 两库皆无，新库会原样复现）。**这一层既不在
+   清单里也不在 workload spec 里，图表/manifest 审计扫不到。**
 4. **第三处（同日续查）**：fd-panel 的 `STATION_IMAGE` 钉
    `fd-industry-runner:sha-8f734c7`——该 tag 在 ccr 与 hkccr **皆不存在**，
    登录站因此拉不起镜像。这是登录站 #33/#34 起了却始终无法完成、rmfyalk
@@ -56,6 +64,8 @@ tag**；另有一批对象仍钉 2026-10-11 退役的 Harbor，全凭节点缓�
 | 8 | anchors.conf 补齐：45+ 条 live pin 入锚；hkccr 缺的从 ccr 反镜像过去 | relay 日志 `OK ... sha-b63d0d1` 每 5 分钟循环 |
 | 9 | 新增 `fd-image-pin-audit.sh`（巡检全舰队钉镜像可拉性） | 已提交 fd-industry-data 6bc9215 |
 | 10 | 面板 `STATION_IMAGE` 改指 ccr `sha-ea21592`（原钉两库皆无的 `sha-8f734c7`） | 面板 rollout success；站镜像 probe Job 拉取+启动实证后清理 |
+| 11 | 7 行 `crawl_sources.runner_image` 滚到锚点 tag（改前值留档）；新增 alembic `0011_federated_runner_tag` 作可重放副本 | DB 复核 7/7 已是锚点 tag；全量测试 1158 passed / 15 failed（15 均为既有失败，已与基线逐文件核对） |
+| 12 | 面板 env / DB 声明纳入「可拉性」规则（不只是 workload spec） | `fd-image-pin-audit.sh` + 事故报告 + skill 坑册均已注明 |
 
 ## 防复发三件套
 
