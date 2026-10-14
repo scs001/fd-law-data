@@ -178,6 +178,28 @@ Before a dry-run or a roll, warm the node and confirm the digest:
 relay can lag GitHub Actions by several minutes — pulling first avoids
 `ImagePullBackOff`.
 
+**⚠ Tag eviction & the anchor rule (2026-10-14 incident).** The relay's
+"seen" ledger deliberately never re-copies a tag it has copied once (TCR
+personal quota: a re-push burns an unrecoverable push slot). Consequence: if
+ccr ever *loses* an evicted tag while hkccr still holds it, the relay will
+**not** bring it back — and the moment a node image-GC evicts its cache, every
+pod pinning that tag dies with `manifest unknown`. On 2026-10-14 this took the
+whole legal line down (`sha-7d89e71` was gone from ccr) plus a 7-hour broker
+outage (still pinned to retired Harbor).
+
+Rules that follow:
+
+1. **Every tag a live object pins must be in `/etc/tcr-relay/anchors.conf`**
+   (cheap3). Anchored tags are re-asserted to ccr every 5 minutes; unanchored
+   ones are trusted to stay put forever — which is false.
+2. **Only pin tags that exist on ccr.** `skopeo inspect` both sides before a
+   roll; a tag that lives only on hkccr is a time bomb.
+3. Fleet-wide pint-audit: `fd-industry-data/scripts/fd-image-pin-audit.sh`
+   reports every pin that no longer resolves (including suspended objects).
+4. Emergency restore of an evicted tag (2 s, keeps quota accounting sane):
+   `ssh cheap3 '/usr/local/bin/tcr-relay-sync.sh lawcraw-business/fd-law-data sha-<x>'`
+   then add the tag to `anchors.conf`.
+
 **If Actions is blocked by account billing** (a run fails within seconds with
 "recent account payments have failed"), fall back to a **delta build on
 xinru-server2** — same region as ccr, so no cross-Pacific push:
