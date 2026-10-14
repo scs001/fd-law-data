@@ -37,6 +37,10 @@ tag**；另有一批对象仍钉 2026-10-11 退役的 Harbor，全凭节点缓�
    "auth pool dry"。另有 vm-0-15 上一枚 **主机级** `/etc/cron.d/fd-dispatcher`
    与集群内 dispatcher 抢单，但它没有 k8s SA token，凡它领到的单必报
    `dispatcher k8s error: ... serviceaccount/token`。
+4. **第三处（同日续查）**：fd-panel 的 `STATION_IMAGE` 钉
+   `fd-industry-runner:sha-8f734c7`——该 tag 在 ccr 与 hkccr **皆不存在**，
+   登录站因此拉不起镜像。这是登录站 #33/#34 起了却始终无法完成、rmfyalk
+   重登被卡的直接原因之一（同一「钉了拉不到的 tag」病型，落在面板 env 上）。
 
 ## 修复动作（全部已实证）
 
@@ -51,6 +55,7 @@ tag**；另有一批对象仍钉 2026-10-11 退役的 Harbor，全凭节点缓�
 | 7 | vm-0-15 主机级 fd-dispatcher cron 禁用（改名留档） | 集群内 dispatcher 是合法路径（有 SA token+namespace env） |
 | 8 | anchors.conf 补齐：45+ 条 live pin 入锚；hkccr 缺的从 ccr 反镜像过去 | relay 日志 `OK ... sha-b63d0d1` 每 5 分钟循环 |
 | 9 | 新增 `fd-image-pin-audit.sh`（巡检全舰队钉镜像可拉性） | 已提交 fd-industry-data 6bc9215 |
+| 10 | 面板 `STATION_IMAGE` 改指 ccr `sha-ea21592`（原钉两库皆无的 `sha-8f734c7`） | 面板 rollout success；站镜像 probe Job 拉取+启动实证后清理 |
 
 ## 防复发三件套
 
@@ -67,9 +72,12 @@ tag**；另有一批对象仍钉 2026-10-11 退役的 Harbor，全凭节点缓�
 
 - **rmfyalk 重登（人工）**：`crawl_identities#27 rmfyalk/acct001` 自 10-10
   02:45 探活 401 后 `login_required`；登录站 #33/#34 起了但一直未完成。
-  流程：`kubectl -n scraw apply -f k8s/legal-auth-broker.yaml`（镜像已换 ccr，
-  可直接拉起）→ port-forward 登录 pod 6080 → 完成上游登录。之后 dispatcher
-  自动恢复派发（本轮验证单 #173 的 "auth pool dry" 属正确行为）。
+  **重登路径已验证畅通（2026-10-14）**：面板 `STATION_IMAGE` 已改指可拉
+  tag（原钉的 `sha-8f734c7` 两库皆无，是站点拉不起来的原因之一）；面板
+  的建 Job 权限与 k8s API 通道实测可用（probe Job 拉取+启动成功）。流程：
+  控制台 `/panel/auth/station/launch` 或面板预拉起 →
+  登录站 noVNC 完成上游登录（60 分钟窗口）。之后 dispatcher 自动恢复派发
+  （本轮验证单 #173 的 "auth pool dry" 属正确行为）。
 - **flk-law-embed**：其 `flk-embed-credentials` secret 在 scraw 不存在，
   保持 suspend；启用前需先补 secret。
 - **my-others/* 三个第三方镜像**：hkccr 命名空间无权推送，无法反镜像；
