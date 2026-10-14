@@ -106,14 +106,13 @@ rmfyalk 会话租借依赖它）。建议迁 PG 数据目录到更大盘（xinru
 
 ## 遗留与人工动作
 
-- **rmfyalk 重登（人工）**：`crawl_identities#27 rmfyalk/acct001` 自 10-10
-  02:45 探活 401 后 `login_required`；登录站 #33/#34 起了但一直未完成。
-  **重登路径已验证畅通（2026-10-14）**：面板 `STATION_IMAGE` 已改指可拉
-  tag（原钉的 `sha-8f734c7` 两库皆无，是站点拉不起来的原因之一）；面板
-  的建 Job 权限与 k8s API 通道实测可用（probe Job 拉取+启动成功）。流程：
-  控制台 `/panel/auth/station/launch` 或面板预拉起 →
-  登录站 noVNC 完成上游登录（60 分钟窗口）。之后 dispatcher 自动恢复派发
-  （本轮验证单 #173 的 "auth pool dry" 属正确行为）。
+- **rmfyalk 重登 — 已完成，全链闭环（2026-10-14 19:42 北京时间）**：
+  登录站 #35 成功（修复后的 `STATION_IMAGE` 路径生效）→ 会话存储+探活 ok →
+  身份 `#27 rmfyalk/acct001` 转 `active` → 「登录完成即触发补跑」自动入队
+  （`requested_by='login-complete'`）→ 派发单 #185 → run `#2084 success`
+  （11 行真数据入库，11:45→11:57）→ legal-sources-report 回绿
+  （freshness 0.1h / `stale: false`，Job 正常退出）。四天断流结束，
+  本事故报告的全部事项（含人工项）至此闭环。
 - **flk-law-embed**：其 `flk-embed-credentials` secret 在 scraw 不存在，
   保持 suspend；启用前需先补 secret。
 - **my-others/* 三个第三方镜像**：hkccr 命名空间无权推送，无法反镜像；
