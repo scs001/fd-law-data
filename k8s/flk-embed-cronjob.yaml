@@ -1,3 +1,14 @@
+# flk-law-embed — laws-export shards -> SiliconFlow embeddings -> Qdrant.
+#
+# 2026-10-14 incident sync: image moved off the retired Harbor
+# (100.64.0.8:30880, decommissioned 2026-10-11) onto ccr, pinned to the same
+# anchored tag as the rest of the legal line. No imagePullSecrets: nodes carry
+# ccr credentials.
+#
+# ⚠ OPEN (2026-10-14): the live CronJob carries EMBED_API_KEY from secret
+# `flk-embed-credentials`, which does NOT exist in the scraw namespace —
+# enabling this job (suspend=false) will fail at env resolution until the
+# secret is recreated or the key sourced elsewhere. Left suspended on purpose.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -8,7 +19,8 @@ metadata:
     app.kubernetes.io/part-of: finddata
 spec:
   schedule: "30 5 * * *"       # 05:30 Asia/Shanghai (nodes run Beijing time) — after the 04:30 loader
-  suspend: false
+  # == live truth (suspended since the 10-13/14 image audit; see OPEN note above).
+  suspend: true
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -20,16 +32,14 @@ spec:
           labels:
             app.kubernetes.io/name: flk-law-embed
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: embedder
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.1.13
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom: {secretKeyRef: {name: flk-law-crawl-credentials, key: rustfs-access-key}}
                 - name: RUSTFS_SECRET_KEY

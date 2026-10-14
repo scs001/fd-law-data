@@ -1,3 +1,11 @@
+# flk-law-load — laws bucket incremental/ -> law_db + laws-export shards.
+#
+# 2026-10-14 incident sync: image moved off the retired Harbor
+# (100.64.0.8:30880, decommissioned 2026-10-11) onto ccr, pinned to the same
+# anchored tag as the rest of the legal line (see helm-law-scraw values.yaml
+# and the fd-law-data README image-channel note). No imagePullSecrets: nodes
+# carry ccr credentials. FD_CRAWL_DB_URL comes from the federation-db secret
+# (the earlier duplicate plaintext env was dropped live on the same day).
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -20,16 +28,14 @@ spec:
           labels:
             app.kubernetes.io/name: flk-law-load
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.1.9
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom: {secretKeyRef: {name: flk-law-crawl-credentials, key: rustfs-access-key}}
                 - name: RUSTFS_SECRET_KEY
@@ -44,4 +50,8 @@ spec:
                   valueFrom: {secretKeyRef: {name: flk-law-pg-credentials, key: pg-password}}
                 - name: PG_DATABASE
                   value: "law_db"
+                - name: FD_CRAWL_DB_URL
+                  valueFrom: {secretKeyRef: {name: federation-db, key: url}}
+                - name: FD_RUNNER_IMAGE_TAG
+                  value: "sha-b63d0d1"
               command: ["node", "bin/flk-load.mjs"]

@@ -1,6 +1,11 @@
 # Wave-1 authoritative legal sources. Crawl Jobs write object storage; loader
 # Jobs are the only objects that receive PostgreSQL credentials. All scheduled
 # Jobs ship suspended until their real run/load pair has been verified.
+#
+# ⚠ SUPERSEDED (2026-10-14): the live objects are chart-managed — apply
+# helm-law-scraw (`helm template law-craw . --namespace scraw | kubectl apply -n
+# scraw -f -`). This standalone copy is kept for reference only; pins below were
+# synced to the chart on 2026-10-14 (Harbor retired 2026-10-11).
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -25,18 +30,16 @@ spec:
             legal.finddata.io/source: rmfyalk-case-library
             legal.finddata.io/account: acct001
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/legal-auth-broker:sha-4b79ec5
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
                   value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
@@ -92,18 +95,16 @@ spec:
             app.kubernetes.io/name: rmfyalk-case-load
             legal.finddata.io/source: rmfyalk-case-library
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
                   value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
@@ -151,18 +152,16 @@ spec:
             app.kubernetes.io/name: mfa-treaty-crawl
             legal.finddata.io/source: mfa-treaty-library
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
                   value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
@@ -198,18 +197,16 @@ spec:
             app.kubernetes.io/name: mfa-treaty-load
             legal.finddata.io/source: mfa-treaty-library
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
                   value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
@@ -257,18 +254,16 @@ spec:
             app.kubernetes.io/name: gov-rules-crawl
             legal.finddata.io/source: gov-rules-library
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
                   value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
@@ -304,18 +299,16 @@ spec:
             app.kubernetes.io/name: gov-rules-load
             legal.finddata.io/source: gov-rules-library
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
                   value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
@@ -363,18 +356,16 @@ spec:
             app.kubernetes.io/name: party-regulation-crawl
             legal.finddata.io/source: party-regulation-library
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
                   value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
@@ -410,18 +401,16 @@ spec:
             app.kubernetes.io/name: party-regulation-load
             legal.finddata.io/source: party-regulation-library
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
                   value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
@@ -469,18 +458,16 @@ spec:
             app.kubernetes.io/name: ccdi-supervisory-crawl
             legal.finddata.io/source: ccdi-supervisory-regulations
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
                   value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
@@ -516,18 +503,16 @@ spec:
             app.kubernetes.io/name: ccdi-supervisory-load
             legal.finddata.io/source: ccdi-supervisory-regulations
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: loader
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
                   value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
@@ -574,18 +559,16 @@ spec:
           labels:
             app.kubernetes.io/name: legal-sources-report
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: report
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
                   value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }
@@ -620,18 +603,16 @@ spec:
           labels:
             app.kubernetes.io/name: flk-law-backfill
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-e78d96e
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: NODE_OPTIONS
                   value: "--max-old-space-size=384"
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"
+                  value: "http://100.64.0.5:9000"
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef: { name: flk-law-crawl-credentials, key: rustfs-access-key }

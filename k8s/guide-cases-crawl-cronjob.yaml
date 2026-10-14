@@ -5,17 +5,15 @@
 # everything to lose from touching the site unattended. Enable it only after
 # a manual run has been reconciled against the bucket (design.md D9).
 #
-# Image note: built by the Jenkins job `fd-law-data`
-# (gitee push -> docker build -> push to Harbor), tagged with the immutable
-# sha-<short-hash> of the commit it was built from. Bump the tag here only
-# after that build is green.
+# Image note (updated 2026-10-14): built via GitHub Actions -> hkccr ->
+# cheap-3 tcr-relay -> ccr, tagged with an immutable sha-<short>. The retired
+# Jenkins->Harbor channel is gone (Harbor decommissioned 2026-10-11); this
+# file still pointed at it and the tag no longer exists anywhere, so a manual
+# apply would have created an unpullable Job. Now pinned to the legal line's
+# anchored tag (helm-law-scraw values.yaml holds the same pin).
 #
-# Prereqs (applied separately, already present for flk/wenshu):
-#   kubectl -n scraw create secret docker-registry harbor-lawcraw-pull \
-#     --docker-server=100.64.0.8:30880 \
-#     --docker-username='<robot>' --docker-password='<token>'
-#   kubectl -n scraw create secret generic flk-law-crawl-credentials \
-#     --from-literal=rustfs-access-key=<key> --from-literal=rustfs-secret-key=<secret>
+# Prereqs: flk-law-crawl-credentials secret (already present). No pull secret:
+# nodes carry ccr credentials.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -40,16 +38,14 @@ spec:
           labels:
             app.kubernetes.io/name: guide-cases-crawl
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:sha-345a50a
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"   # tailnet-internal RustFS
+                  value: "http://100.64.0.5:9000"   # tailnet-internal RustFS
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef:

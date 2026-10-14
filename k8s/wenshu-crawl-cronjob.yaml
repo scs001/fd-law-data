@@ -47,17 +47,15 @@ spec:
           labels:
             app.kubernetes.io/name: wenshu-crawl
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: crawler
               # placeholder tag — bump on build (docker buildx via cheap-1 law-builder)
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data-wenshu:v0.1.0
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data-wenshu:sha-cb8f542
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"   # tailnet-internal RustFS
+                  value: "http://100.64.0.5:9000"   # tailnet-internal RustFS
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef:

@@ -1,14 +1,13 @@
 # flk-law-crawl CronJob — xinru cluster, scraw namespace.
-# Standalone manifest (the helm-law-scraw chart installs the full scrapyd
-# stack; xinru/scraw only needs this crawler). Sourced from the chart's
-# flk-law-crawl-cronjob.yaml template with concrete values.
 #
-# Prereqs (applied separately):
-#   kubectl -n scraw create secret docker-registry harbor-lawcraw-pull \
-#     --docker-server=100.64.0.8:30880 \
-#     --docker-username='<robot>' --docker-password='<token>'
-#   kubectl -n scraw create secret generic flk-law-crawl-credentials \
-#     --from-literal=rustfs-access-key=<key> --from-literal=rustfs-secret-key=<secret>
+# ⚠ SUPERSEDED (2026-10-14): the live object is chart-managed — apply
+# helm-law-scraw (`helm template law-craw . --namespace scraw | kubectl apply -n
+# scraw -f -`), which pins this same image tag. This standalone copy is kept for
+# reference only; do NOT apply it (it would fight the chart).
+#
+# 2026-10-14 incident sync: image moved off the retired Harbor
+# (100.64.0.8:30880, decommissioned 2026-10-11) onto ccr, pinned to the legal
+# line's anchored tag. No imagePullSecrets: nodes carry ccr credentials.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -31,16 +30,14 @@ spec:
           labels:
             app.kubernetes.io/name: flk-law-crawl
         spec:
-          imagePullSecrets:
-            - name: harbor-lawcraw-pull
           restartPolicy: OnFailure
           containers:
             - name: crawler
-              image: 100.64.0.8:30880/lawcraw_business/fd-law-data:v0.1.9
+              image: ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-b63d0d1
               imagePullPolicy: IfNotPresent
               env:
                 - name: RUSTFS_ENDPOINT
-                  value: "http://100.64.0.11:9000"   # tailnet-internal RustFS
+                  value: "http://100.64.0.5:9000"   # tailnet-internal RustFS
                 - name: RUSTFS_ACCESS_KEY
                   valueFrom:
                     secretKeyRef:
