@@ -37,7 +37,26 @@ env:
   NAMESPACE: lawcraw-business
 
 jobs:
+  # 测试先跑：爬虫切片/分页/幂等与 auth-broker 会话状态机是核心不变量，
+  # 测试不过不应出片。node --test 全部离线（Playwright 只做 DOM 解析，不起浏览器）。
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install
+        run: npm ci
+
+      - name: Test suite
+        run: npm test
+
   build-push:
+    needs: test
     strategy:
       fail-fast: false
       matrix:
