@@ -202,16 +202,88 @@ test("worker refuses to touch historical law ids", async () => {
 
 // ---- self-check ----
 
+// The probe shard defaults to the current manifest's first shard. These fixtures
+// therefore always ship an incr-manifest.json alongside the probe shard, and
+// pass probeShard explicitly when they want a specific one.
+
 test("self-check passes when the fresh vector reproduces the stored one", async () => {
-  const objects = { "sh2-00000.jsonl": Buffer.from(shardBody([{ point_id: 1048576, chunk_id: "1:0", law_id: "1", chunk_no: 0, chunk_text: "历史文本", payload: {} }])) };
+  const objects = {
+    "incr-manifest.json": Buffer.from(JSON.stringify({ shards: [{ shard: "sh2-00000.jsonl", rows: 1 }] })),
+    "sh2-00000.jsonl": Buffer.from(shardBody([{ point_id: 1048576, chunk_id: "1:0", law_id: "1", chunk_no: 0, chunk_text: "历史文本", payload: {} }])),
+  };
   const res = await selfCheck({ s3: makeS3(objects), bucket: "b", embedder: { embed: async () => ({ vectors: [[1, 0]] }) }, qdrant: { getPoint: async () => ({ vector: [1, 0] }) } });
   assert.ok(res.cosine > 0.999);
+  assert.equal(res.probe, 1048576);
 });
 
 test("self-check aborts when the vector space drifted", async () => {
-  const objects = { "sh2-00000.jsonl": Buffer.from(shardBody([{ point_id: 1048576, chunk_text: "x", payload: {} }])) };
+  const objects = {
+    "incr-manifest.json": Buffer.from(JSON.stringify({ shards: [{ shard: "sh2-00000.jsonl", rows: 1 }] })),
+    "sh2-00000.jsonl": Buffer.from(shardBody([{ point_id: 1048576, chunk_text: "x", payload: {} }])),
+  };
   await assert.rejects(
     () => selfCheck({ s3: makeS3(objects), bucket: "b", embedder: { embed: async () => ({ vectors: [[0, 1]] }) }, qdrant: { getPoint: async () => ({ vector: [1, 0] }) } }),
     /does not match the historical corpus/,
+  );
+});
+
+test("self-check walks past probe points that no longer exist", async () => {
+  // Regression: the first row of the old hardcoded probe shard had been
+  // re-chunked away, so every run aborted with a 404 that read like a
+  // credentials failure. It must skip dead points instead of giving up.
+  const objects = {
+    "incr-manifest.json": Buffer.from(JSON.stringify({ shards: [{ shard: "incr-x-00000.jsonl", rows: 3 }] })),
+    "incr-x-00000.jsonl": Buffer.from(
+      shardBody([
+        { point_id: 1048576, chunk_text: "已删除的旧块", payload: {} },
+        { point_id: 1048577, chunk_text: "也不在了", payload: {} },
+        { point_id: 74758225920, chunk_text: "仍然存在", payload: {} },
+      ]),
+    ),
+  };
+  const res = await selfCheck({
+    s3: makeS3(objects),
+    bucket: "b",
+    embedder: { embed: async () => ({ vectors: [[1, 0]] }) },
+    qdrant: {
+      getPoint: async (id) => (id === 74758225920 ? { vector: [1, 0] } : null),
+    },
+  });
+  assert.equal(res.probe, 74758225920);
+  assert.ok(res.cosine > 0.999);
+});
+
+test("self-check fails loudly when no probe point exists at all", async () => {
+  const objects = {
+    "incr-manifest.json": Buffer.from(JSON.stringify({ shards: [{ shard: "incr-x-00000.jsonl", rows: 2 }] })),
+    "incr-x-00000.jsonl": Buffer.from(
+      shardBody([
+        { point_id: 1, chunk_text: "a", payload: {} },
+        { point_id: 2, chunk_text: "b", payload: {} },
+      ]),
+    ),
+  };
+  await assert.rejects(
+    () =>
+      selfCheck({
+        s3: makeS3(objects),
+        bucket: "b",
+        embedder: { embed: async () => ({ vectors: [[1, 0]] }) },
+        qdrant: { getPoint: async () => null },
+      }),
+    /none of the first 2 points .* exist in the collection/,
+  );
+});
+
+test("self-check requires incr-manifest.json when no probe shard is given", async () => {
+  await assert.rejects(
+    () =>
+      selfCheck({
+        s3: makeS3({}),
+        bucket: "b",
+        embedder: { embed: async () => ({ vectors: [[1, 0]] }) },
+        qdrant: { getPoint: async () => ({ vector: [1, 0] }) },
+      }),
+    /incr-manifest\.json not found/,
   );
 });
