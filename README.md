@@ -163,61 +163,46 @@ observation window** per source: freshness stays inside the 48h green line and
 the daily report shows no `stale` verdict. Wave-flip manual:
 `helm-law-scraw/APPLY-NOTES.md`.
 
-### Image channel: GitHub Actions → hkccr → tcr-relay → ccr
+### Image channel
 
-Never use Jenkins→Harbor for new pins (that channel is retired; Harbor was
-uninstalled 2026-10-11). Tags are `sha-<7-char>` plus a rolling `main`.
+Every push to `main` runs the test suite and then builds + pushes all three
+images to the registry configured in `.github/workflows/image.yml`, tagged with
+the immutable `sha-<7-char>` of the triggering commit plus a rolling `main`.
 
-```
-push → Actions image.yml → hkccr.ccs.tencentyun.com/lawcraw-business/fd-law-data
-     → cheap-3 tcr-relay (cron */5) → ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data
-```
+Warm the node before a dry-run or a roll and confirm the digest with
+`crictl pull <registry>/<ns>/fd-law-data:sha-<x>`.
 
-Before a dry-run or a roll, warm the node and confirm the digest:
-`crictl pull ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-<x>`. The
-relay can lag GitHub Actions by several minutes — pulling first avoids
-`ImagePullBackOff`.
-
-**⚠ Tag eviction & the anchor rule (2026-10-14 incident).** The relay's
-"seen" ledger deliberately never re-copies a tag it has copied once (TCR
-personal quota: a re-push burns an unrecoverable push slot). Consequence: if
-ccr ever *loses* an evicted tag while hkccr still holds it, the relay will
-**not** bring it back — and the moment a node image-GC evicts its cache, every
-pod pinning that tag dies with `manifest unknown`. On 2026-10-14 this took the
-whole legal line down (`sha-7d89e71` was gone from ccr) plus a 7-hour broker
-outage (still pinned to retired Harbor).
+**⚠ Tag eviction.** Many registries (including Tencent TCR personal edition)
+cap tags per repository and do **not** reclaim the quota when a tag is deleted
+through the v2 API — only the console does. A deployment that pins a tag the
+registry has evicted dies with `manifest unknown` the moment the node's image
+cache is GC'd.
 
 Rules that follow:
 
-1. **Every tag a live object pins must be in `/etc/tcr-relay/anchors.conf`**
-   (cheap3). Anchored tags are re-asserted to ccr every 5 minutes; unanchored
-   ones are trusted to stay put forever — which is false.
-2. **Only pin tags that exist on ccr.** `skopeo inspect` both sides before a
-   roll; a tag that lives only on hkccr is a time bomb.
-3. Fleet-wide pint-audit: `fd-industry-data/scripts/fd-image-pin-audit.sh`
-   reports every pin that no longer resolves (including suspended objects).
-4. Emergency restore of an evicted tag (2 s, keeps quota accounting sane):
-   `ssh cheap3 '/usr/local/bin/tcr-relay-sync.sh lawcraw-business/fd-law-data sha-<x>'`
-   then add the tag to `anchors.conf`.
+1. **Audit your pins.** Every tag a live object pins must still resolve; a pin
+   audit that reports unresolvable tags is a time bomb, not noise.
+2. **Only pin tags that exist in the registry your nodes pull from.** Verify
+   both sides with `skopeo inspect` before a roll.
+3. Keep the last known-good `sha-` tag per image so a rollback is a manifest
+   edit rather than a rebuild.
 
 **If Actions is blocked by account billing** (a run fails within seconds with
-"recent account payments have failed"), fall back to a **delta build on
-xinru-server2** — same region as ccr, so no cross-Pacific push:
+"recent account payments have failed"): private repositories draw on a metered
+Actions allowance, public ones do not. Either make the build repository public
+(this repo carries no credentials — all secrets arrive via Actions secrets and
+cluster Secrets), or fall back to a delta build:
 
 ```bash
 mkdir -p /root/delta-law/{bin,lib/legal-sources}     # target dirs must exist first
 cd /root/delta-law
 cat > Dockerfile <<'EOF'
-FROM ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-<base>
+FROM <registry>/<ns>/fd-law-data:sha-<base>
 COPY bin/<changed>.mjs /app/bin/<changed>.mjs
 EOF
-docker build -t ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-<new> \
-  -f /root/delta-law/Dockerfile /root/delta-law
-docker push ccr.ccs.tencentyun.com/lawcraw-business/fd-law-data:sha-<new>
+docker build -t <registry>/<ns>/fd-law-data:sha-<new> -f Dockerfile .
+docker push <registry>/<ns>/fd-law-data:sha-<new>
 ```
-
-Then roll with `kubectl set image cronjob/<name> -n scraw "*=...:sha-<new>"`
-(nodes already carry ccr credentials; a bare `ctr images pull` returns 401).
 
 ### Daily report inspection (日期序列巡检法)
 
@@ -308,21 +293,23 @@ node bin/flk-crawl.mjs --dry-run --since 2026-08-01 --codes 201   # live crawl, 
 
 ## Deployment (live)
 
-**xinru cluster, `scraw` namespace** (where the proxy/scraw infra actually
-runs — NOT the migrating cheap cluster):
+**Kubernetes CronJob** (daily 02:30 Asia/Shanghai). The deployment manifests
+are not part of this repository — they carry cluster-specific addressing. Apply
+them from your own infrastructure repo, providing:
+
+- a `dockerconfigjson` pull secret for your registry,
+- a Secret with `rustfs-access-key` / `rustfs-secret-key`,
+- `RUSTFS_ENDPOINT`, `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY`, `LAWS_BUCKET`
+  as container env.
 
 ```bash
-# one-time secrets (already created 2026-09-18):
-#   harbor-lawcraw-pull            — dockerconfigjson for 100.64.0.8:30880/lawcraw_business
-#   flk-law-crawl-credentials      — rustfs-access-key / rustfs-secret-key
-kubectl -n scraw apply -f k8s/flk-crawl-cronjob.yaml   # daily 02:30 Asia/Shanghai
+kubectl apply -f <your-infra-repo>/flk-crawl-cronjob.yaml
 ```
 
-Image: **built by the Jenkins job `fd-law-data`** — gitee push (webhook token
-`fd-law-data`) → `docker build` → push to `100.64.0.8:30880/lawcraw_business/`,
-tagged with the immutable `sha-<short-hash>` of the commit it was built from
-(push a branch and read the tag off the build log, then pin it in the
-manifest). The job also builds the Playwright image via the `BUILD_WENSHU`
+Image: **built by GitHub Actions** (`.github/workflows/image.yml`) — every push
+to `main` runs the test suite, then builds and pushes all three images tagged
+with the immutable `sha-<short-hash>` of the triggering commit (plus a rolling
+`main`). Pin the `sha-` tag in your deployment manifest. The job also builds the Playwright image via the `BUILD_WENSHU`
 parameter, off by default because the build node's disk is tight.
 
 ```bash
@@ -538,10 +525,9 @@ is the live check.
 
 ### Deployment (live)
 
-**xinru cluster, `scraw` namespace**: helm chart `wenshuCrawl` block, or the
-standalone `k8s/wenshu-crawl-cronjob.yaml`. Image:
-`lawcraw_business/fd-law-data-wenshu` — Playwright image built from
-`fd-law-data/Dockerfile.wenshu`.
+A Kubernetes CronJob (manifests live in your infrastructure repo, not here).
+Image: `fd-law-data-wenshu` — the Playwright image built from
+`Dockerfile.wenshu`.
 
 Secret `wenshu-crawl-credentials` keys: `rustfs-access-key`,
 `rustfs-secret-key`, `wenshu-account-user`, `wenshu-account-password`. Real

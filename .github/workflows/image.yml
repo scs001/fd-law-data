@@ -5,11 +5,8 @@
 #
 # 三镜像一次推送全绿（matrix，形态同 fd-wire build.yml）：
 #   fd-law-data         ← Dockerfile（flk/legal-source 爬虫主镜像）
-#   legal-auth-broker   ← Dockerfile.auth-broker（Harbor 侧镜像名：k8s 清单引
-#                          lawcraw_business/legal-auth-broker、cheap-3 tcr-relay
-#                          repos.conf 亦按此名登记；原 GHA 用的
-#                          fd-law-data-auth-broker 从未进 relay=ccr 侧无引用，
-#                          2026-10-09 改名对齐，避免双名分叉）
+#   legal-auth-broker   ← Dockerfile.auth-broker（部署清单按此名引用；原名
+#                          fd-law-data-auth-broker 无消费方，2026-10-09 改名对齐）
 #   fd-law-data-wenshu  ← Dockerfile.wenshu（Playwright 重镜像；原 dispatch-only
 #                          沿 Jenkins BUILD_WENSHU 默认关惯例——Jenkins 退役后
 #                          该惯例随之消亡，改为每次 push 必建）

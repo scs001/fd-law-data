@@ -209,8 +209,8 @@ try {
     // ---- 2. chunks for every ok-content law of this file lacking them ----
     // Two generations coexist (storage doc §1.2): law_chunks (v1, 200-450) kept
     // for schema parity, and law_chunks_v2, the LIVE semantic layer — Qdrant's
-    // active collection is law_chunks_v2 (verified 2026-09-19 at
-    // 100.64.0.9:6333, 448,187 points, 1024-dim). Export shards come from v2.
+    // active collection is law_chunks_v2 (verified 2026-09-19: 448,187 points,
+    // 1024-dim). Export shards come from v2.
     // Chunking runs on the normalized text so new rows match the legacy corpus;
     // the stored content is normalized with it, keeping offsets meaningful.
     if (!arg("no-chunks") && !dryRun) {

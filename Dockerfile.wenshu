@@ -1,7 +1,6 @@
 # fd-law-data wenshu crawler image (Playwright browser automation for court
 # judgments; NO PG credentials — the wenshu loader runs on the data machine).
-# Built like fd-law-data/Dockerfile: docker buildx via cheap-1 law-builder,
-# pushed to the lawcraw_business project (100.64.0.8:30880). The wenshu
+# Built like fd-law-data/Dockerfile (GitHub Actions, linux/amd64). The wenshu
 # ACCOUNT credentials are NEVER baked into the image — they reach the cluster
 # only via the wenshu-crawl-credentials Secret.
 # Base image ships browsers preinstalled; its version MUST match the npm
