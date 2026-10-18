@@ -12,9 +12,11 @@
 #                          该惯例随之消亡，改为每次 push 必建）
 # tag = sha-${GITHUB_SHA::7} + 滚动 main。
 #
-# org GHA 私有仓被 billing 挡（2026-10-07T13:11Z 起全红，job 未启动级失败）：
-# 实际构建发生在 scs001/fd-law-data 个人镜像仓（免费 minutes，形态同
-# scs001/fd-wire）；本文件为真源，随主干同步镜像仓。
+# 构建发生在 scs001/fd-law-data **公开**镜像仓（本文件为真源，随主干同步过去）。
+# 2026-10-19 实证：私有仓的 Actions 按分钟计费，额度耗尽后 job 在启动阶段直接
+# 失败（无 runner、2 秒内结束，看起来像 workflow 写错了）；同一份 workflow 在
+# 公开仓不限时免费。该镜像仓只放构建所需文件（bin/ lib/ test/ scripts/
+# Dockerfile* + 本 workflow），k8s/ 与内网地址留在私有基础设施仓。
 name: image
 
 on:

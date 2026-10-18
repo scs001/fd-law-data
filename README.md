@@ -172,37 +172,24 @@ the immutable `sha-<7-char>` of the triggering commit plus a rolling `main`.
 Warm the node before a dry-run or a roll and confirm the digest with
 `crictl pull <registry>/<ns>/fd-law-data:sha-<x>`.
 
-**⚠ Tag eviction.** Many registries (including Tencent TCR personal edition)
-cap tags per repository and do **not** reclaim the quota when a tag is deleted
+**Tag eviction.** Many registries (including Tencent TCR personal edition) cap
+tags per repository and do **not** reclaim the quota when a tag is deleted
 through the v2 API — only the console does. A deployment that pins a tag the
 registry has evicted dies with `manifest unknown` the moment the node's image
 cache is GC'd.
 
 Rules that follow:
 
-1. **Audit your pins.** Every tag a live object pins must still resolve; a pin
-   audit that reports unresolvable tags is a time bomb, not noise.
+1. **Audit your pins.** Every tag a live object pins must still resolve.
 2. **Only pin tags that exist in the registry your nodes pull from.** Verify
    both sides with `skopeo inspect` before a roll.
 3. Keep the last known-good `sha-` tag per image so a rollback is a manifest
    edit rather than a rebuild.
 
-**If Actions is blocked by account billing** (a run fails within seconds with
-"recent account payments have failed"): private repositories draw on a metered
-Actions allowance, public ones do not. Either make the build repository public
-(this repo carries no credentials — all secrets arrive via Actions secrets and
-cluster Secrets), or fall back to a delta build:
-
-```bash
-mkdir -p /root/delta-law/{bin,lib/legal-sources}     # target dirs must exist first
-cd /root/delta-law
-cat > Dockerfile <<'EOF'
-FROM <registry>/<ns>/fd-law-data:sha-<base>
-COPY bin/<changed>.mjs /app/bin/<changed>.mjs
-EOF
-docker build -t <registry>/<ns>/fd-law-data:sha-<new> -f Dockerfile .
-docker push <registry>/<ns>/fd-law-data:sha-<new>
-```
+**If Actions is blocked by account billing**: private repositories draw on a
+metered Actions allowance, public ones do not. Either make the build repository
+public (this repo carries no credentials — secrets arrive via Actions secrets
+and cluster Secrets), or do a delta build from the previous image.
 
 ### Daily report inspection (日期序列巡检法)
 
@@ -295,12 +282,9 @@ node bin/flk-crawl.mjs --dry-run --since 2026-08-01 --codes 201   # live crawl, 
 
 **Kubernetes CronJob** (daily 02:30 Asia/Shanghai). The deployment manifests
 are not part of this repository — they carry cluster-specific addressing. Apply
-them from your own infrastructure repo, providing:
-
-- a `dockerconfigjson` pull secret for your registry,
-- a Secret with `rustfs-access-key` / `rustfs-secret-key`,
-- `RUSTFS_ENDPOINT`, `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY`, `LAWS_BUCKET`
-  as container env.
+them from your own infrastructure repo, providing a `dockerconfigjson` pull
+secret for your registry, a Secret with `rustfs-access-key` /
+`rustfs-secret-key`, and `RUSTFS_ENDPOINT` / `LAWS_BUCKET` as container env.
 
 ```bash
 kubectl apply -f <your-infra-repo>/flk-crawl-cronjob.yaml
